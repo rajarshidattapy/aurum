@@ -14,3 +14,6 @@ Aurum is an AI-powered mutual fund trading terminal for Indian markets, combinin
 - DB: PostgreSQL, Redis
 - AI: LLM-based agents
 
+## Refer:
+1) https://github.com/feremabraz/bloomberg-terminal
+2) https://github.com/0xemmkty/QuantMuse
