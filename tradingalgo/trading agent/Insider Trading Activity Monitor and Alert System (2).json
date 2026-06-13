@@ -1,0 +1,334 @@
+{
+  "name": "Insider Trading Activity Monitor and Alert System",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "92339339-22bf-4b48-b7ab-724e6b92e785",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2288,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "finnhubApiKey",
+              "value": "d42gt9hr01qorlerau8gd42gt9hr01qorlerau90",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "significantThreshold",
+              "value": 50000,
+              "type": "number"
+            },
+            {
+              "id": "id-4",
+              "name": "fromDate",
+              "value": "={{ $now.minus({ days: 7 }).toFormat(\"yyyy-MM-dd\") }}",
+              "type": "string"
+            },
+            {
+              "id": "id-5",
+              "name": "toDate",
+              "value": "={{ $now.toFormat(\"yyyy-MM-dd\") }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "6c9cf489-0dc2-4930-b9cc-034cbb9ddec8",
+      "name": "Workflow Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2064,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://finnhub.io/api/v1/stock/insider-transactions?from={{ $json.fromDate }}&to={{ $json.toDate }}&token={{ $json.finnhubApiKey }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a4e6f719-d066-4a60-b3b0-d5ceca912062",
+      "name": "Fetch Insider Transactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1840,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the data array from the API response\nconst transactions = $input.all()[0].json.data || [];\n\nconsole.log('Total transactions received:', transactions.length);\n\n// Group transactions by symbol and calculate net insider activity\nconst stockActivity = {};\n\ntransactions.forEach(transaction => {\n  const symbol = transaction.symbol || 'N/A';\n  \n  // Finnhub uses 'share' not 'shares'\n  const shares = Math.abs(parseFloat(transaction.share) || 0);\n  \n  // Finnhub uses 'transactionPrice' not 'price'\n  const price = parseFloat(transaction.transactionPrice) || 0;\n  \n  const transactionValue = shares * price;\n  \n  // Determine if it's a buy or sell based on the 'change' field\n  const netChange = parseFloat(transaction.change) || 0;\n  const isBuy = netChange > 0;\n  const isSell = netChange < 0;\n  const transactionCode = isBuy ? 'P' : isSell ? 'S' : 'O';\n  \n  const transactionDate = transaction.transactionDate || '';\n  const name = transaction.name || 'Unknown';\n  \n  // Skip if no valid symbol\n  if (symbol === 'N/A' || !symbol) {\n    return;\n  }\n  \n  // Initialize stock if not exists\n  if (!stockActivity[symbol]) {\n    stockActivity[symbol] = {\n      symbol: symbol,\n      mspr: 0,\n      change: 0,\n      year: '',\n      month: '',\n      transactions: []\n    };\n  }\n  \n  // Calculate mspr (money spent on purchases minus sales)\n  if (isBuy) {\n    stockActivity[symbol].mspr += transactionValue;\n    stockActivity[symbol].change += shares;\n  } else if (isSell) {\n    stockActivity[symbol].mspr -= transactionValue;\n    stockActivity[symbol].change -= shares;\n  }\n  \n  // Store raw transaction details\n  stockActivity[symbol].transactions.push({\n    name: name,\n    position: 'Insider',\n    shares: shares,\n    price: price,\n    value: transactionValue,\n    transactionCode: transactionCode,\n    transactionType: isBuy ? 'BUY' : isSell ? 'SELL' : 'OTHER',\n    transactionDate: transactionDate,\n    filingDate: transaction.filingDate || '',\n    transactionPrice: price,\n    netChange: netChange\n  });\n  \n  // Extract year and month from transaction date\n  if (transactionDate && !stockActivity[symbol].year) {\n    const dateParts = transactionDate.split('-');\n    if (dateParts.length >= 2) {\n      stockActivity[symbol].year = dateParts[0];\n      stockActivity[symbol].month = dateParts[1];\n    }\n  }\n});\n\n// Convert to array and sort by absolute value of money flow\nconst sortedStocks = Object.values(stockActivity)\n  .filter(stock => Math.abs(stock.mspr) > 0)\n  .sort((a, b) => Math.abs(b.mspr) - Math.abs(a.mspr))\n  .slice(0, 5);\n\nconsole.log('Stocks with activity:', sortedStocks.length);\n\n// Always return at least one item\nif (sortedStocks.length === 0) {\n  return [{\n    json: {\n      symbol: 'N/A',\n      mspr: 0,\n      change: 0,\n      year: '',\n      month: '',\n      transactions: [],\n      message: 'No insider transactions found in the specified date range'\n    }\n  }];\n}\n\nreturn sortedStocks.map(stock => ({\n  json: stock\n}));"
+      },
+      "id": "2fc0f838-879f-423a-9cc0-dbdf7eb46c96",
+      "name": "Process and Filter Transactions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1616,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\nconst symbol = item.symbol;\n\nif (!symbol || symbol === 'N/A') {\n  return {\n    json: {\n      ...item,\n      companyName: 'Unknown',\n      industry: 'N/A',\n      marketCap: 'N/A',\n      news: {\n        topHeadlines: [],\n        sentiment: { label: 'Neutral', score: 0 }\n      },\n      topInsiders: [],\n      enriched: false\n    }\n  };\n}\n\nreturn {\n  json: {\n    ...item,\n    companyName: symbol,\n    industry: 'Technology',\n    marketCap: 'N/A',\n    news: {\n      topHeadlines: [],\n      sentiment: { label: 'Neutral', score: 0 }\n    },\n    topInsiders: item.transactions.map(t => ({\n      name: t.name,\n      position: t.position,\n      totalValue: t.value,\n      totalValueFormatted: `$${(t.value / 1000000).toFixed(2)}M`,\n      activity: t.transactionCode === 'P' ? 'BUYING' : 'SELLING'\n    })),\n    enriched: true\n  }\n};"
+      },
+      "id": "ee061546-b5d0-4427-a4cb-810b7891bfe9",
+      "name": "Enrich Transaction Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1392,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst analyzedStocks = items.map(item => {\n  const data = item.json;\n  const symbol = data.symbol;\n  const transactions = data.transactions || [];\n  \n  const netMoneyFlow = data.mspr || 0;\n  const netSharesChange = data.change || 0;\n  const activityType = netMoneyFlow > 0 ? 'NET BUYING' : netMoneyFlow < 0 ? 'NET SELLING' : 'NO NET ACTIVITY';\n  \n  const netMoneyFlowFormatted = `$${(Math.abs(netMoneyFlow) / 1000000).toFixed(2)}M ${netMoneyFlow >= 0 ? '(BUY)' : '(SELL)'}`;\n  const netSharesChangeFormatted = `${Math.abs(netSharesChange).toLocaleString()} shares ${netSharesChange >= 0 ? '↑' : '↓'}`;\n  \n  // Enhanced insider analysis\n  const insiderAnalysis = {};\n  \n  transactions.forEach(t => {\n    const insiderName = t.name || 'Unknown Insider';\n    \n    if (!insiderAnalysis[insiderName]) {\n      insiderAnalysis[insiderName] = {\n        name: insiderName,\n        totalBuyValue: 0,\n        totalSellValue: 0,\n        buyCount: 0,\n        sellCount: 0,\n        netValue: 0,\n        transactions: []\n      };\n    }\n    \n    const insider = insiderAnalysis[insiderName];\n    \n    if (t.transactionType === 'BUY') {\n      insider.totalBuyValue += t.value;\n      insider.buyCount++;\n    } else if (t.transactionType === 'SELL') {\n      insider.totalSellValue += t.value;\n      insider.sellCount++;\n    }\n    \n    insider.netValue = insider.totalBuyValue - insider.totalSellValue;\n    insider.transactions.push(t);\n  });\n  \n  const topInsiders = Object.values(insiderAnalysis)\n    .sort((a, b) => Math.abs(b.netValue) - Math.abs(a.netValue))\n    .map(insider => {\n      const activity = insider.netValue > 0 ? 'BUYING' : insider.netValue < 0 ? 'SELLING' : 'NEUTRAL';\n      const confidence = Math.abs(insider.netValue) > 1000000 ? 'HIGH' : \n                        Math.abs(insider.netValue) > 500000 ? 'MEDIUM' : 'LOW';\n      \n      let analysis = '';\n      const netVal = insider.netValue;\n      const buyCount = insider.buyCount;\n      const sellCount = insider.sellCount;\n      \n      if (netVal > 1000000 && buyCount > sellCount) {\n        analysis = `Strong conviction buyer - accumulated $${(netVal/1000000).toFixed(2)}M across ${buyCount} buy transaction(s). This is a very bullish signal.`;\n      } else if (netVal > 500000 && buyCount > 0) {\n        analysis = `Moderate buyer - net purchases of $${(netVal/1000000).toFixed(2)}M in ${buyCount} transaction(s). Positive sentiment.`;\n      } else if (netVal < -1000000 && sellCount > buyCount) {\n        analysis = `Heavy seller - disposed $${(Math.abs(netVal)/1000000).toFixed(2)}M across ${sellCount} sell transaction(s). Potentially bearish signal.`;\n      } else if (netVal < -500000 && sellCount > 0) {\n        analysis = `Moderate seller - net sales of $${(Math.abs(netVal)/1000000).toFixed(2)}M in ${sellCount} transaction(s). Worth monitoring.`;\n      } else if (buyCount > 0 && sellCount > 0) {\n        analysis = `Mixed activity - both buying (${buyCount}) and selling (${sellCount}). Net position: $${(Math.abs(netVal)/1000000).toFixed(2)}M ${netVal >= 0 ? 'buy' : 'sell'}.`;\n      } else {\n        analysis = `Limited activity - $${(Math.abs(netVal)/1000000).toFixed(2)}M net ${netVal >= 0 ? 'buying' : 'selling'} across ${buyCount + sellCount} transaction(s).`;\n      }\n      \n      return {\n        name: insider.name,\n        position: 'Insider',\n        activity: activity,\n        buyTransactions: insider.buyCount,\n        sellTransactions: insider.sellCount,\n        totalTransactions: insider.buyCount + insider.sellCount,\n        totalBuyValue: insider.totalBuyValue,\n        totalSellValue: insider.totalSellValue,\n        netValue: insider.netValue,\n        netValueFormatted: `$${(Math.abs(insider.netValue) / 1000000).toFixed(2)}M`,\n        confidence: confidence,\n        analysis: analysis\n      };\n    });\n  \n  // Company analysis\n  const totalInsiders = topInsiders.length;\n  const buyers = topInsiders.filter(i => i.activity === 'BUYING').length;\n  const sellers = topInsiders.filter(i => i.activity === 'SELLING').length;\n  \n  let companyAnalysis = [];\n  \n  if (netMoneyFlow > 5000000) {\n    companyAnalysis.push(`🟢 VERY BULLISH: Massive insider buying of $${(netMoneyFlow/1000000).toFixed(1)}M suggests insiders believe the stock is significantly undervalued.`);\n  } else if (netMoneyFlow > 1000000) {\n    companyAnalysis.push(`🟢 BULLISH: Strong insider buying of $${(netMoneyFlow/1000000).toFixed(1)}M indicates positive sentiment about company prospects.`);\n  } else if (netMoneyFlow < -5000000) {\n    companyAnalysis.push(`🔴 VERY BEARISH: Heavy insider selling of $${(Math.abs(netMoneyFlow)/1000000).toFixed(1)}M suggests insiders may be concerned about near-term prospects.`);\n  } else if (netMoneyFlow < -1000000) {\n    companyAnalysis.push(`🔴 BEARISH: Significant insider selling of $${(Math.abs(netMoneyFlow)/1000000).toFixed(1)}M indicates caution warranted.`);\n  } else {\n    companyAnalysis.push(`🟡 NEUTRAL: Limited insider activity ($${(Math.abs(netMoneyFlow)/1000000).toFixed(2)}M) - no strong signal either way.`);\n  }\n  \n  if (buyers > sellers * 2) {\n    companyAnalysis.push(`📊 CONSENSUS: Strong buying consensus with ${buyers} buyers vs ${sellers} sellers (${((buyers/(buyers+sellers))*100).toFixed(0)}% buying).`);\n  } else if (sellers > buyers * 2) {\n    companyAnalysis.push(`📊 CONSENSUS: Selling pressure with ${sellers} sellers vs ${buyers} buyers (${((sellers/(buyers+sellers))*100).toFixed(0)}% selling).`);\n  } else if (buyers === sellers) {\n    companyAnalysis.push(`📊 CONSENSUS: Split decision with ${buyers} buyers and ${sellers} sellers - no clear direction.`);\n  } else {\n    companyAnalysis.push(`📊 CONSENSUS: Mixed signals with ${buyers} buyers and ${sellers} sellers across ${totalInsiders} total insider(s).`);\n  }\n  \n  if (Math.abs(netMoneyFlow) > 1000000) {\n    if (netMoneyFlow > 0) {\n      companyAnalysis.push(`💡 ACTION: Consider accumulating shares. Insider buying of this magnitude often precedes positive developments.`);\n    } else {\n      companyAnalysis.push(`💡 ACTION: Review position and consider reducing exposure. Insider selling may indicate overvaluation or upcoming challenges.`);\n    }\n  } else {\n    companyAnalysis.push(`💡 ACTION: Continue monitoring. Activity level not significant enough to warrant immediate action.`);\n  }\n  \n  // Recommendation\n  let recommendationAction = 'HOLD';\n  let recommendationReason = 'Monitor closely for further developments';\n  let confidence = 'MEDIUM';\n  \n  if (Math.abs(netMoneyFlow) > 5000000) {\n    if (netMoneyFlow > 0) {\n      recommendationAction = '🚀 STRONG BUY';\n      recommendationReason = `Significant insider buying of $${(netMoneyFlow/1000000).toFixed(1)}M indicates very strong confidence in the company's future`;\n      confidence = 'HIGH';\n    } else {\n      recommendationAction = '⚠️ CAUTION';\n      recommendationReason = `Significant insider selling of $${(Math.abs(netMoneyFlow)/1000000).toFixed(1)}M warrants caution - insiders may have concerns`;\n      confidence = 'HIGH';\n    }\n  } else if (Math.abs(netMoneyFlow) > 1000000) {\n    if (netMoneyFlow > 0) {\n      recommendationAction = '📈 BUY';\n      recommendationReason = `Moderate insider buying of $${(netMoneyFlow/1000000).toFixed(1)}M is a positive signal - insiders are accumulating`;\n      confidence = 'MEDIUM';\n    } else {\n      recommendationAction = '👀 MONITOR';\n      recommendationReason = `Moderate insider selling of $${(Math.abs(netMoneyFlow)/1000000).toFixed(1)}M - watch for continuation or reversal`;\n      confidence = 'MEDIUM';\n    }\n  } else if (Math.abs(netMoneyFlow) > 100000) {\n    recommendationAction = '📊 HOLD';\n    recommendationReason = `Small insider activity of $${(Math.abs(netMoneyFlow)/1000000).toFixed(2)}M - not significant enough to act on`;\n    confidence = 'LOW';\n  }\n  \n  return {\n    ...data,\n    insiderActivity: {\n      netMoneyFlow: netMoneyFlow,\n      netMoneyFlowFormatted: netMoneyFlowFormatted,\n      netSharesChange: netSharesChange,\n      netSharesChangeFormatted: netSharesChangeFormatted,\n      activityType: activityType,\n      totalInsiders: topInsiders.length,\n      buyersCount: topInsiders.filter(i => i.activity === 'BUYING').length,\n      sellersCount: topInsiders.filter(i => i.activity === 'SELLING').length\n    },\n    topInsiders: topInsiders,\n    companyAnalysis: companyAnalysis.join('\\n\\n'),\n    recommendation: {\n      action: recommendationAction,\n      reason: recommendationReason,\n      confidence: confidence\n    }\n  };\n});\n\nreturn analyzedStocks.map(stock => ({ json: stock }));"
+      },
+      "id": "f0fd29c7-c141-4cc6-9ada-81fa236a4e17",
+      "name": "Analyze and Generate Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1168,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "alertTitle",
+              "value": "🚨 TOP 5 INSIDER TRADES - QUICK SUMMARY",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "alertMessage",
+              "value": "=={{ \n(function() {\n  const stocks = $input.all().slice(0, 5);\n  const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });\n  \n  let message = '🔔 INSIDER TRADING ALERT\\n' + dateStr + '\\n\\n';\n  \n  stocks.forEach(function(item, index) {\n    const symbol = item.json.symbol || 'N/A';\n    const companyName = item.json.companyName || symbol;\n    const netFlow = item.json.insiderActivity?.netMoneyFlow || 0;\n    const netFlowFormatted = item.json.insiderActivity?.netMoneyFlowFormatted || 'N/A';\n    const action = item.json.recommendation?.action || 'HOLD';\n    \n    const topInsiders = item.json.topInsiders || [];\n    const topInsider = topInsiders[0];\n    \n    if (topInsider) {\n      const tradeAction = topInsider.activity === 'BUYING' ? 'BOUGHT' : 'SOLD';\n      const emoji = topInsider.activity === 'BUYING' ? '📈' : '📉';\n      \n      message += emoji + ' #' + (index + 1) + ' ' + symbol + '\\n';\n      message += topInsider.name + ' ' + tradeAction + ' ' + topInsider.netValueFormatted + '\\n';\n      message += 'Signal: ' + action + '\\n\\n';\n    } else {\n      message += '• #' + (index + 1) + ' ' + symbol + ' - ' + netFlowFormatted + '\\n';\n      message += 'Signal: ' + action + '\\n\\n';\n    }\n  });\n  \n  message += '📧 Detailed analysis in email';\n  \n  return message;\n})()\n}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "92e9068a-0dbf-404a-88b1-9479fc1d851b",
+      "name": "Format Telegram Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -944,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "alertTitle",
+              "value": "📊 Insider Trading Deep Dive - Top 5 Opportunities",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "alertMessage",
+              "value": "=\n\n={{ $input.all().slice(0, 5).map((item, index) => {\n  const symbol = item.json.symbol || 'N/A';\n  const companyName = item.json.companyName || symbol;\n  const netFlow = item.json.insiderActivity?.netMoneyFlow || 0;\n  const netFlowFormatted = item.json.insiderActivity?.netMoneyFlowFormatted || 'N/A';\n  const sharesChange = item.json.insiderActivity?.netSharesChange || 0;\n  const activityType = item.json.insiderActivity?.activityType || 'NO ACTIVITY';\n  const totalInsiders = item.json.insiderActivity?.totalInsiders || 0;\n  const buyersCount = item.json.insiderActivity?.buyersCount || 0;\n  const sellersCount = item.json.insiderActivity?.sellersCount || 0;\n  \n  const topInsiders = item.json.topInsiders || [];\n  const recommendationAction = item.json.recommendation?.action || 'HOLD';\n  const confidence = item.json.recommendation?.confidence || 'N/A';\n  \n  // Generate contextual analysis\n  const isBuying = netFlow > 0;\n  const isSelling = netFlow < 0;\n  const flowMagnitude = Math.abs(netFlow / 1000000);\n  \n  let contextAnalysis = '';\n  \n  if (flowMagnitude > 100) {\n    contextAnalysis = isBuying \n      ? `This is an exceptionally large insider purchase. When insiders commit over $${flowMagnitude.toFixed(0)}M of their own capital, it typically signals they have access to non-public information suggesting the stock is significantly undervalued or a major positive catalyst is approaching.`\n      : `This massive insider sale of $${flowMagnitude.toFixed(0)}M is noteworthy. Possible reasons include: (1) portfolio diversification, (2) personal liquidity needs, (3) concerns about valuation, or (4) knowledge of upcoming challenges. Given the size, it warrants close monitoring.`;\n  } else if (flowMagnitude > 10) {\n    contextAnalysis = isBuying\n      ? `Substantial insider buying at this level ($${flowMagnitude.toFixed(1)}M) suggests insiders believe the current price offers good value. This could indicate upcoming product launches, strong earnings expectations, or strategic initiatives not yet reflected in the stock price.`\n      : `Significant insider selling of $${flowMagnitude.toFixed(1)}M. While insiders sell for many reasons unrelated to company prospects (tax planning, estate planning, diversification), the magnitude suggests careful monitoring is warranted.`;\n  } else if (flowMagnitude > 1) {\n    contextAnalysis = isBuying\n      ? `Moderate insider buying ($${flowMagnitude.toFixed(2)}M) is a positive signal. Insiders are putting their own money at risk, suggesting confidence in near-term performance.`\n      : `Moderate insider selling ($${flowMagnitude.toFixed(2)}M). This level of selling is relatively common and may not signal concerns about company fundamentals.`;\n  } else {\n    contextAnalysis = `Limited insider activity at this level ($${flowMagnitude.toFixed(2)}M) provides minimal signal about company prospects.`;\n  }\n  \n  let insidersText = '';\n  if (topInsiders.length > 0) {\n    insidersText = topInsiders.map((insider, idx) => {\n      const action = insider.activity === 'BUYING' ? 'BOUGHT' : 'SOLD';\n      const emoji = insider.activity === 'BUYING' ? '📈' : '📉';\n      const shares = insider.buyTransactions > 0 \n        ? `${insider.buyTransactions} purchase${insider.buyTransactions > 1 ? 's' : ''}`\n        : `${insider.sellTransactions} sale${insider.sellTransactions > 1 ? 's' : ''}`;\n      \n      return `${emoji} ${insider.name} ${action} ${insider.netValueFormatted} across ${shares}\n   ${insider.analysis}`;\n    }).join('\\n\\n');\n  } else {\n    insidersText = 'No detailed insider data available.';\n  }\n  \n  return `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nINSIDER TRADE #${index + 1}: ${companyName} (${symbol})\n\nSUMMARY\nNet Activity: ${netFlowFormatted} (${activityType})\nTotal Insiders: ${totalInsiders} (${buyersCount} buying, ${sellersCount} selling)\nShares Impact: ${Math.abs(sharesChange).toLocaleString()} shares\nRecommendation: ${recommendationAction} (${confidence} confidence)\n\nINSIDER TRANSACTIONS\n\n${insidersText}\n\nANALYSIS & INTERPRETATION\n\n${contextAnalysis}\n\nMarket Context: ${buyersCount > sellersCount ? \n  `With ${buyersCount} insider(s) buying vs ${sellersCount} selling, there's a buying consensus suggesting positive sentiment.` :\n  sellersCount > buyersCount ?\n  `With ${sellersCount} insider(s) selling vs ${buyersCount} buying, selling pressure dominates. Monitor for potential concerns.` :\n  `Mixed signals with equal buying and selling activity.`}\n\nINVESTMENT CONSIDERATION\n\n${recommendationAction === '🚀 STRONG BUY' || recommendationAction === '📈 BUY' ?\n  `Consider this a potential opportunity. Insider buying at this level often precedes positive stock performance. Recommended actions: (1) Research recent company news and earnings, (2) Evaluate current valuation, (3) Consider position sizing.` :\n  recommendationAction === '⚠️ CAUTION' || recommendationAction === '👀 MONITOR' ?\n  `Exercise caution. Recommended actions: (1) Review your current position, (2) Investigate reasons for insider selling, (3) Set stop losses if holding, (4) Wait for clarity before new positions.` :\n  `Neutral stance warranted. Continue monitoring for clearer signals.`}\n\n`;\n}).join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "07ed9045-3cb9-4062-a80e-6e8406c4d796",
+      "name": "Format Email Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -944,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "586357283",
+        "text": "={{ $json.alertTitle }}\\n\\n{{ $json.alertMessage }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "b75e834a-5e7a-4bbc-a879-d6316b5b7c00",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -720,
+        64
+      ],
+      "webhookId": "517a3e7f-c39b-4b6b-a913-77b169fe0172",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "vaughanfawcett1@gmail.com",
+        "subject": "={{ $json.alertTitle }}",
+        "message": "={{ $json.alertMessage }}",
+        "options": {}
+      },
+      "id": "5fdb03e2-99fd-4715-a866-5c86f76c5075",
+      "name": "Send Gmail Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -720,
+        256
+      ],
+      "webhookId": "22469ebf-61bd-4398-9c9a-2bfaec100f25",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "3o9bAYjIuE7Kau7l",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Workflow Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Configuration": {
+      "main": [
+        [
+          {
+            "node": "Fetch Insider Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Insider Transactions": {
+      "main": [
+        [
+          {
+            "node": "Process and Filter Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process and Filter Transactions": {
+      "main": [
+        [
+          {
+            "node": "Enrich Transaction Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich Transaction Details": {
+      "main": [
+        [
+          {
+            "node": "Analyze and Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze and Generate Report": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format Email Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Email Message": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7961edb1-6b7c-4841-a325-4e7eebf54f15",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bda284ba69a5bf5f0d731ca0a44a60340df82eff9ee04a27b6a86d364a4b86e3"
+  },
+  "id": "6BUzTJ5sEGOW0Mkp",
+  "tags": []
+}

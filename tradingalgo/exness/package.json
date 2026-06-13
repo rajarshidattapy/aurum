@@ -1,0 +1,29 @@
+{
+  "name": "exness-turbo-repo",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "dev:engine": "turbo run dev --filter=trading-engine",
+    "dev:market-data": "turbo run dev --filter=market-data-service",
+    "dev:frontend": "turbo run dev --filter=trading-frontend",
+    "dev:services": "turbo run dev --filter=trading-engine --filter=market-data-service",
+    "dev:all": "turbo run dev --filter=trading-engine --filter=market-data-service --filter=trading-frontend",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "check-types": "turbo run check-types"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "turbo": "^2.5.6",
+    "typescript": "5.9.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "npm@10.9.3",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

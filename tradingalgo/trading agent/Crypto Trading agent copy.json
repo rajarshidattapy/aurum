@@ -1,0 +1,538 @@
+{
+  "name": "Crypto Trading agent copy",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2080,
+        -48
+      ],
+      "id": "fd391fc4-908f-4ca3-a26e-6cb28107211c",
+      "name": "Telegram Trigger",
+      "webhookId": "4e4e8b37-deec-4f1f-8d29-ef76ee01970f",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "crypto-check",
+              "leftValue": "={{ $json.message.text.toUpperCase() }}",
+              "rightValue": "BTC",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "eth-check",
+              "leftValue": "={{ $json.message.text.toUpperCase() }}",
+              "rightValue": "ETH",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1856,
+        -48
+      ],
+      "id": "a9cce5df-b3bc-4d57-9750-5486e9128f38",
+      "name": "Validate Command"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "symbol",
+              "name": "symbol",
+              "value": "={{ $json.message.text.toUpperCase().includes('BTC') ? 'bitcoin' : 'ethereum' }}",
+              "type": "string"
+            },
+            {
+              "id": "symbol-code",
+              "name": "symbolCode",
+              "value": "={{ $json.message.text.toUpperCase().includes('BTC') ? 'BTC' : 'ETH' }}",
+              "type": "string"
+            },
+            {
+              "id": "chat-id",
+              "name": "chatId",
+              "value": "={{ $json.message.chat.id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1632,
+        -64
+      ],
+      "id": "5978f444-1a23-4309-aead-38354de0fa24",
+      "name": "Extract Symbol"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.coingecko.com/api/v3/coins/{{ $json.symbol }}/market_chart",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "vs_currency",
+              "value": "usd"
+            },
+            {
+              "name": "days",
+              "value": "7"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1392,
+        -352
+      ],
+      "id": "d6c00c8a-2f53-4160-ab26-0b96be036a00",
+      "name": "CoinGecko Price"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.coingecko.com/api/v3/coins/{{ $json.symbol }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1392,
+        -144
+      ],
+      "id": "22d2c7b3-fc0c-4ee7-829c-ec33a4f3539d",
+      "name": "CoinGecko Market"
+    },
+    {
+      "parameters": {
+        "url": "https://cryptopanic.com/api/v1/posts/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "auth_token",
+              "value": "80d9ea694a3a94f211fb376077e0257ebb7f902d"
+            },
+            {
+              "name": "currencies",
+              "value": "={{ $json.symbolCode }}"
+            },
+            {
+              "name": "public",
+              "value": "true"
+            },
+            {
+              "name": "filter",
+              "value": "hot"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1392,
+        48
+      ],
+      "id": "312c6d96-f52a-4c03-a5a2-925e80190585",
+      "name": "Crypto News"
+    },
+    {
+      "parameters": {
+        "url": "https://newsapi.org/v2/everything",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.symbolCode === 'BTC' ? 'Bitcoin OR BTC' : 'Ethereum OR ETH' }}"
+            },
+            {
+              "name": "apiKey",
+              "value": "your key"
+            },
+            {
+              "name": "from",
+              "value": "={{ DateTime.now().minus({ days: 2 }).toFormat('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "sortBy",
+              "value": "publishedAt"
+            },
+            {
+              "name": "language",
+              "value": "en"
+            },
+            {
+              "name": "pageSize",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1392,
+        256
+      ],
+      "id": "a4485487-f548-4426-9597-cf7de5108bf6",
+      "name": "NewsAPI Sentiment"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -1136,
+        -96
+      ],
+      "id": "8e616f35-4665-4cac-b36b-a644c8137e79",
+      "name": "Merge Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process crypto data for AI analysis\nconst items = $input.all();\nconst symbolNode = $('Extract Symbol').first();\n\nlet cryptoData = {\n  symbol: symbolNode?.json?.symbolCode || 'BTC',\n  fullName: symbolNode?.json?.symbol || 'bitcoin',\n  timestamp: new Date().toISOString(),\n  price: {},\n  market: {},\n  news: [],\n  social: {},\n  technical: {}\n};\n\ntry {\n  // Process each item from the 4 HTTP requests\n  for (const item of items) {\n    const data = item.json;\n    \n    // CoinGecko Price Data (from market_chart endpoint)\n    if (data.prices && Array.isArray(data.prices)) {\n      const prices = data.prices.map(p => p[1]);\n      const last24 = prices.slice(-24);\n      \n      cryptoData.price = {\n        current: prices[prices.length - 1].toFixed(2),\n        change_24h: prices.length >= 24 ? ((prices[prices.length - 1] - prices[prices.length - 24]) / prices[prices.length - 24] * 100).toFixed(2) : '0',\n        high_24h: Math.max(...last24).toFixed(2),\n        low_24h: Math.min(...last24).toFixed(2),\n        history: prices.slice(-24)\n      };\n    }\n    \n    // CoinGecko Market Data (from coins endpoint)\n    if (data.market_data) {\n      cryptoData.market = {\n        market_cap: (data.market_data.market_cap?.usd || 0).toLocaleString('en-US'),\n        volume_24h: (data.market_data.total_volume?.usd || 0).toLocaleString('en-US'),\n        ath: (data.market_data.ath?.usd || 0).toFixed(2),\n        ath_change: (data.market_data.ath_change_percentage?.usd || 0).toFixed(2),\n        rank: data.market_data.market_cap_rank || 0\n      };\n    }\n    \n    // CryptoPanic News - Check multiple possible response structures\n    if (data.results && Array.isArray(data.results) && data.results.length > 0) {\n      cryptoData.news = data.results.slice(0, 10).map(article => ({\n        title: article.title,\n        published: article.published_at,\n        votes: article.votes || {},\n        sentiment: (article.votes?.positive || 0) > (article.votes?.negative || 0) ? 'bullish' : \n                  (article.votes?.negative || 0) > (article.votes?.positive || 0) ? 'bearish' : 'neutral',\n        source: article.source?.title || 'Unknown'\n      }));\n    }\n    // Fallback: Use NewsAPI articles as crypto news if CryptoPanic fails\n    else if (data.articles && Array.isArray(data.articles) && cryptoData.news.length === 0) {\n      const cryptoArticles = data.articles.filter(a => {\n        const text = ((a.title || '') + ' ' + (a.description || '')).toLowerCase();\n        return text.includes('bitcoin') || text.includes('btc') || text.includes('ethereum') || text.includes('eth') || text.includes('crypto');\n      }).slice(0, 10);\n      \n      if (cryptoArticles.length > 0) {\n        const bullishWords = ['surge', 'rally', 'bullish', 'gain', 'rise', 'up', 'high', 'boost', 'positive', 'soar'];\n        const bearishWords = ['crash', 'fall', 'bearish', 'loss', 'drop', 'down', 'low', 'decline', 'plunge', 'tumble'];\n        \n        cryptoData.news = cryptoArticles.map(article => {\n          const text = ((article.title || '') + ' ' + (article.description || '')).toLowerCase();\n          const bullish = bullishWords.filter(word => text.includes(word)).length;\n          const bearish = bearishWords.filter(word => text.includes(word)).length;\n          \n          return {\n            title: article.title,\n            published: article.publishedAt,\n            sentiment: bullish > bearish ? 'bullish' : bearish > bullish ? 'bearish' : 'neutral',\n            source: article.source?.name || 'NewsAPI'\n          };\n        });\n      }\n    }\n    \n    // NewsAPI Sentiment Analysis\n    if (data.articles && Array.isArray(data.articles)) {\n      const articles = data.articles.slice(0, 20);\n      const bullishWords = ['surge', 'rally', 'bullish', 'gain', 'rise', 'up', 'high', 'boost', 'positive', 'optimistic', 'soar', 'breakthrough'];\n      const bearishWords = ['crash', 'fall', 'bearish', 'loss', 'drop', 'down', 'low', 'decline', 'negative', 'pessimistic', 'plunge', 'tumble'];\n      \n      let bullishCount = 0;\n      let bearishCount = 0;\n      \n      for (const article of articles) {\n        const text = ((article.title || '') + ' ' + (article.description || '')).toLowerCase();\n        \n        const bullish = bullishWords.filter(word => text.includes(word)).length;\n        const bearish = bearishWords.filter(word => text.includes(word)).length;\n        \n        if (bullish > bearish) {\n          bullishCount++;\n        } else if (bearish > bullish) {\n          bearishCount++;\n        }\n      }\n      \n      cryptoData.social = {\n        source: 'NewsAPI',\n        total_articles: articles.length,\n        bullish: bullishCount,\n        bearish: bearishCount,\n        neutral: articles.length - bullishCount - bearishCount,\n        sentiment: bullishCount > bearishCount ? 'BULLISH' : bearishCount > bullishCount ? 'BEARISH' : 'NEUTRAL',\n        score: ((bullishCount - bearishCount) / Math.max(articles.length, 1)).toFixed(3)\n      };\n    }\n  }\n  \n  // Technical Indicators\n  if (cryptoData.price.history && cryptoData.price.history.length > 0) {\n    const prices = cryptoData.price.history;\n    const sma20 = prices.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, prices.length);\n    \n    cryptoData.technical = {\n      sma_20: sma20.toFixed(2),\n      distance_from_sma: ((parseFloat(cryptoData.price.current) - sma20) / sma20 * 100).toFixed(2),\n      trend: prices[prices.length - 1] > prices[0] ? 'BULLISH' : 'BEARISH',\n      volatility: ((parseFloat(cryptoData.price.high_24h) - parseFloat(cryptoData.price.low_24h)) / parseFloat(cryptoData.price.low_24h) * 100).toFixed(2)\n    };\n  }\n  \n  // Overall Sentiment - Now uses news data\n  const newsPositive = cryptoData.news.filter(n => n.sentiment === 'bullish').length;\n  const newsNegative = cryptoData.news.filter(n => n.sentiment === 'bearish').length;\n  \n  cryptoData.overall = {\n    news_bullish: newsPositive,\n    news_bearish: newsNegative,\n    social_sentiment: cryptoData.social.sentiment || 'NEUTRAL',\n    technical_trend: cryptoData.technical.trend || 'NEUTRAL',\n    combined: (newsPositive > newsNegative && cryptoData.social.sentiment === 'BULLISH') ? 'STRONG BULLISH' :\n             (newsNegative > newsPositive && cryptoData.social.sentiment === 'BEARISH') ? 'STRONG BEARISH' : 'MIXED'\n  };\n  \n} catch (error) {\n  cryptoData.error = error.message;\n  cryptoData.errorStack = error.stack;\n}\n\nreturn [{ json: cryptoData }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        -48
+      ],
+      "id": "3c0f77f9-2c33-45b2-9e69-da9750a5a407",
+      "name": "Process Data"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# CRYPTO ANALYSIS: {{ $json.symbol }}\n\n**PRICE DATA:**\n- Current: ${{ $json.price.current }}\n- 24H Change: {{ $json.price.change_24h }}%\n- 24H High: ${{ $json.price.high_24h }}\n- 24H Low: ${{ $json.price.low_24h }}\n\n**MARKET DATA:**\n- Market Cap: ${{ $json.market.market_cap }}\n- 24H Volume: ${{ $json.market.volume_24h }}\n- ATH: ${{ $json.market.ath }}\n- ATH Change: ${{ $json.market.ath_change }}%\n- Rank: #{{ $json.market.rank }}\n\n**TECHNICAL INDICATORS:**\n- SMA 20: ${{ $json.technical.sma_20 }}\n- Distance from SMA: {{ $json.technical.distance_from_sma }}%\n- Trend: {{ $json.technical.trend }}\n- Volatility: {{ $json.technical.volatility }}%\n\n**SENTIMENT ANALYSIS:**\n- News: {{ $json.overall.news_bullish }} bullish / {{ $json.overall.news_bearish }} bearish\n- Social (NewsAPI): {{ $json.social.sentiment }} ({{ $json.social.bullish }}/{{ $json.social.bearish }} articles)\n- Overall: {{ $json.overall.combined }}\n\n**TOP NEWS:**\n{{ $json.news.slice(0, 5).map((n, i) => `${i+1}. [${n.sentiment.toUpperCase()}] ${n.title} - ${n.source}`).join('\\n') }}\n\n---\n\nProvide a trading recommendation in this format:\n\n**BUY/SELL/HOLD Signal:**\n```\n{{ $json.symbol }} [ACTION]\n\nENTRY: $[price]\nSTOP LOSS: $[price] ([%])\nTAKE PROFIT 1: $[price] ([%])\nTAKE PROFIT 2: $[price] ([%])\n\nANALYSIS:\n- Technical: [brief]\n- Sentiment: [brief]\n- Risk/Reward: [ratio]\n- Confidence: [High/Medium/Low]\n\nREASONING:\n• [Point 1]\n• [Point 2]\n• [Point 3]\n```\n\nOR for HOLD:\n```\n{{ $json.symbol }} HOLD\n\nREASON:\n• [Key reason 1]\n• [Key reason 2]\n\nWAIT FOR: [conditions]\n```",
+        "options": {
+          "systemMessage": "You are an expert cryptocurrency trader with 10+ years of experience. You combine technical analysis with sentiment analysis to provide clear, actionable trading recommendations.\n\nYour philosophy:\n- Only recommend trades with favorable risk/reward (minimum 1:2)\n- Be conservative - better to miss a trade than take a bad one\n- Always include stop losses and take profit levels\n- Consider market context and volatility\n- Keep responses concise and professional\n\nRespond in the specified format only."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -752,
+        -48
+      ],
+      "id": "1e6e787a-3968-47c9-bff6-3c5da12cb037",
+      "name": "AI Trading Agent"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        160
+      ],
+      "id": "861c59a6-29f2-4702-90bc-6eaf6ea82723",
+      "name": "OpenAI GPT-4o",
+      "credentials": {
+        "openAiApi": {
+          "id": "mTU0qrB9NCnt4Ocr",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Extract Symbol').first().json.symbolCode }}_{{ $('Extract Symbol').first().json.chatId }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.2,
+      "position": [
+        -640,
+        160
+      ],
+      "id": "82cfc4aa-952f-4b62-a711-d5d2219fc8ce",
+      "name": "Chat Memory"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Extract Symbol').first().json.chatId }}",
+        "text": "=🤖 **{{ $('Process Data').first().json.symbol }} Trading Analysis**\n\n{{ $json.output }}\n\n---\n⚠️ *Not financial advice. DYOR.*",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -448,
+        -48
+      ],
+      "id": "2655f610-3a16-44dc-8c1c-edd5af67b6aa",
+      "name": "Send Signal",
+      "webhookId": "c9817479-b62e-4f12-9a04-d99e1719b17b",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.message.chat.id }}",
+        "text": "=❌ **Invalid Command**\n\n✅ **Valid commands:**\n• `BTC` - Bitcoin analysis\n• `ETH` - Ethereum analysis\n\n**Example:** Just type `BTC` and send.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -1632,
+        144
+      ],
+      "id": "b5708f79-70a5-4c31-94ee-b4da341ddd6d",
+      "name": "Error: Invalid Command",
+      "webhookId": "1d8e4df9-2625-42ec-9af6-34d01cb3da2e",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 🎯 Crypto Trading Agent \n\n\n**📊 Data Sources:**\n1. CoinGecko (price + market)\n2. CryptoPanic (crypto news)\n3. NewsAPI (sentiment analysis)\n4. GPT-4o (AI analysis)\n\n**💰 Cost:**\n- Total: $30/month (OpenAI only)\n- All data sources: FREE\n\n**🚀 Setup:**\n1. Add Telegram credentials\n2. Add OpenAI API key\n3. Activate workflow\n4. Send `BTC` or `ETH`\n\n",
+        "height": 428,
+        "width": 380
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2288,
+        -560
+      ],
+      "id": "a5ee251f-d9bc-44b2-a2c2-b7a96d9597c0",
+      "name": "📋 Instructions"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Command": {
+      "main": [
+        [
+          {
+            "node": "Extract Symbol",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Invalid Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Symbol": {
+      "main": [
+        [
+          {
+            "node": "CoinGecko Price",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "CoinGecko Market",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Crypto News",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "NewsAPI Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CoinGecko Price": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CoinGecko Market": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Data": {
+      "main": [
+        [
+          {
+            "node": "Process Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Data": {
+      "main": [
+        [
+          {
+            "node": "AI Trading Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Trading Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT-4o": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Trading Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Trading Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crypto News": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "NewsAPI Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1abea7d3-2d99-4c33-be18-ac61b6118fe0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bda284ba69a5bf5f0d731ca0a44a60340df82eff9ee04a27b6a86d364a4b86e3"
+  },
+  "id": "zcbS3JcPOWyDzggu",
+  "tags": []
+}

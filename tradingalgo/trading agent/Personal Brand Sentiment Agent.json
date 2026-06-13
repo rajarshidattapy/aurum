@@ -1,0 +1,924 @@
+{
+  "name": "Personal Brand Sentiment Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": 1,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "c16fbd50-69b7-4c3c-964a-c7c203c80e02",
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "jsonData",
+        "options": {}
+      },
+      "id": "242438a6-57bf-4419-b1ab-cda0b7dc168d",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -224,
+        192
+      ],
+      "notes": "Configure: brandName, alternateNames, viralThreshold (100+), emailRecipients, telegramChatId, searchKeywords"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "searchText": "={{ $json.brandName }}",
+        "returnAll": true,
+        "additionalFields": {}
+      },
+      "id": "d75e6917-30da-4eeb-934f-4f27f0426e62",
+      "name": "Twitter/X Search",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "twitterOAuth2Api": {
+          "id": "PSbY1LNZ4rc9Ir9i",
+          "name": "X account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.reddit.com/search.json?q={{ encodeURIComponent($('Configuration').item.json.brandName) }}&sort=new&limit=100&t=week",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "redditOAuth2Api",
+        "options": {}
+      },
+      "id": "cf5192c9-5bf5-401f-96b1-8fd5c017f910",
+      "name": "Reddit Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        192
+      ],
+      "credentials": {
+        "redditOAuth2Api": {
+          "id": "9qpQFRmxQ3sxYqAz",
+          "name": "Reddit account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/youtube/v3/search?part=snippet&q={{ encodeURIComponent($('Configuration').item.json.brandName) }}&type=video&maxResults=50&order=date&key={{ $credentials.youtubeApiKey }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "options": {}
+      },
+      "id": "fba0a679-e5d6-41ca-bd61-f0fe5afd6f93",
+      "name": "YouTube Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        368
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "Yvb5pDRxng7jt7Jf",
+          "name": "Query Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId={{ $json.id.videoId }}&maxResults=100&order=relevance&key={{ $credentials.youtubeApiKey }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "options": {}
+      },
+      "id": "5f77e0c1-30b5-4c2b-9a45-589bfe08babc",
+      "name": "Get YouTube Comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        368
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "hVWiQThYWKcNeJrn",
+          "name": "Query Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.rss2json.com/v1/api.json?rss_url=https://www.google.com/alerts/feeds/{{ $credentials.googleAlertFeedId }}/{{ encodeURIComponent($('Configuration').item.json.brandName) }}",
+        "options": {}
+      },
+      "id": "c7c773e9-a9e2-4f47-a916-ff73f2165c64",
+      "name": "Google Alerts (Blogs/News)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        544
+      ],
+      "notes": "Alternative: Use RSS feed from Google Alerts or NewsAPI"
+    },
+    {
+      "parameters": {
+        "url": "=https://listen-api.listennotes.com/api/v2/search?q={{ encodeURIComponent($('Configuration').item.json.brandName) }}&type=episode&sort_by_date=1&only_in=title,description",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "f20b361c-c6ca-4d5e-9c69-3b362d42a310",
+      "name": "Podcast Mentions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        720
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yBSqMzGkvSxTeENU",
+          "name": "Header Auth account 3"
+        }
+      },
+      "notes": "Uses Listen Notes API for podcast search"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and normalize Twitter data\nconst config = $('Configuration').item.json;\nconst items = [];\n\nfor (const item of $input.all()) {\n  try {\n    const tweet = item.json;\n    items.push({\n      json: {\n        platform: 'Twitter',\n        id: tweet.id_str || tweet.id,\n        text: tweet.full_text || tweet.text || '',\n        author: tweet.user?.screen_name || 'unknown',\n        author_id: tweet.user?.id_str || '',\n        created_at: tweet.created_at,\n        url: `https://twitter.com/${tweet.user?.screen_name}/status/${tweet.id_str}`,\n        engagement: {\n          likes: tweet.favorite_count || 0,\n          retweets: tweet.retweet_count || 0,\n          replies: tweet.reply_count || 0,\n          total: (tweet.favorite_count || 0) + (tweet.retweet_count || 0) + (tweet.reply_count || 0)\n        },\n        timestamp: new Date(tweet.created_at).toISOString(),\n        raw_data: tweet\n      }\n    });\n  } catch (error) {\n    console.log('Error parsing Twitter item:', error);\n  }\n}\n\nreturn items;"
+      },
+      "id": "92d34c45-3813-44c3-b3fa-40fe42185c3d",
+      "name": "Parse Twitter Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and normalize Reddit data\nconst config = $('Configuration').item.json;\nconst items = [];\n\nfor (const item of $input.all()) {\n  try {\n    const data = item.json;\n    const posts = data.data?.children || [];\n    \n    for (const post of posts) {\n      const p = post.data;\n      items.push({\n        json: {\n          platform: 'Reddit',\n          id: p.id,\n          text: p.title + '\\n\\n' + (p.selftext || ''),\n          author: p.author,\n          subreddit: p.subreddit,\n          created_at: new Date(p.created_utc * 1000).toISOString(),\n          url: 'https://reddit.com' + p.permalink,\n          engagement: {\n            upvotes: p.ups || 0,\n            downvotes: p.downs || 0,\n            comments: p.num_comments || 0,\n            total: (p.ups || 0) + (p.num_comments || 0)\n          },\n          timestamp: new Date(p.created_utc * 1000).toISOString(),\n          raw_data: p\n        }\n      });\n    }\n  } catch (error) {\n    console.log('Error parsing Reddit item:', error);\n  }\n}\n\nreturn items;"
+      },
+      "id": "0218fd6e-c34f-4168-87c7-66f72edd59f5",
+      "name": "Parse Reddit Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and normalize YouTube comments data\nconst config = $('Configuration').item.json;\nconst items = [];\n\nfor (const item of $input.all()) {\n  try {\n    const data = item.json;\n    const comments = data.items || [];\n    \n    for (const comment of comments) {\n      const c = comment.snippet.topLevelComment.snippet;\n      items.push({\n        json: {\n          platform: 'YouTube',\n          id: comment.id,\n          text: c.textDisplay,\n          author: c.authorDisplayName,\n          channel_id: c.authorChannelId?.value || '',\n          video_id: c.videoId,\n          created_at: c.publishedAt,\n          url: `https://youtube.com/watch?v=${c.videoId}&lc=${comment.id}`,\n          engagement: {\n            likes: c.likeCount || 0,\n            replies: comment.snippet.totalReplyCount || 0,\n            total: (c.likeCount || 0) + (comment.snippet.totalReplyCount || 0)\n          },\n          timestamp: c.publishedAt,\n          raw_data: comment\n        }\n      });\n    }\n  } catch (error) {\n    console.log('Error parsing YouTube item:', error);\n  }\n}\n\nreturn items;"
+      },
+      "id": "4fa353b7-e5e1-4f40-9d8a-f013bb36ea12",
+      "name": "Parse YouTube Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse blog/news data from Google Alerts RSS\nconst config = $('Configuration').item.json;\nconst items = [];\n\nfor (const item of $input.all()) {\n  try {\n    const data = item.json;\n    const articles = data.items || [];\n    \n    for (const article of articles) {\n      items.push({\n        json: {\n          platform: 'Blog/News',\n          id: article.guid || article.link,\n          text: article.title + '\\n\\n' + (article.description || ''),\n          author: article.author || 'unknown',\n          created_at: article.pubDate,\n          url: article.link,\n          engagement: {\n            total: 0  // No engagement data from RSS\n          },\n          timestamp: article.pubDate,\n          source: article.source?.title || 'unknown',\n          raw_data: article\n        }\n      });\n    }\n  } catch (error) {\n    console.log('Error parsing Blog/News item:', error);\n  }\n}\n\nreturn items;"
+      },
+      "id": "835acbca-155e-4efa-9e42-5bb3bed0a4fa",
+      "name": "Parse Blog/News Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse podcast data\nconst config = $('Configuration').item.json;\nconst items = [];\n\nfor (const item of $input.all()) {\n  try {\n    const data = item.json;\n    const episodes = data.results || [];\n    \n    for (const episode of episodes) {\n      items.push({\n        json: {\n          platform: 'Podcast',\n          id: episode.id,\n          text: episode.title_original + '\\n\\n' + (episode.description_original || ''),\n          author: episode.podcast?.title_original || 'unknown',\n          podcast_name: episode.podcast?.title_original,\n          created_at: new Date(episode.pub_date_ms).toISOString(),\n          url: episode.audio,\n          engagement: {\n            total: 0  // No engagement data from Listen Notes\n          },\n          timestamp: new Date(episode.pub_date_ms).toISOString(),\n          audio_length: episode.audio_length_sec,\n          raw_data: episode\n        }\n      });\n    }\n  } catch (error) {\n    console.log('Error parsing Podcast item:', error);\n  }\n}\n\nreturn items;"
+      },
+      "id": "f561b58d-bce9-4f36-93cf-e7d667c22f3a",
+      "name": "Parse Podcast Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        720
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c1e00735-b369-4638-8828-f518decc0cbf",
+      "name": "Merge All Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        672,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Remove duplicates based on ID and URL\nconst seen = new Set();\nconst items = [];\n\nfor (const item of $input.all()) {\n  const key = item.json.id + '|' + item.json.url;\n  if (!seen.has(key)) {\n    seen.add(key);\n    items.push(item);\n  }\n}\n\nconsole.log(`Deduplicated: ${$input.all().length} → ${items.length} items`);\nreturn items;"
+      },
+      "id": "7faee593-e3bf-4ccc-bd46-37290299166d",
+      "name": "Remove Duplicates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI analysis and combine with sentiment\nconst items = [];\n\nfor (const item of $input.all()) {\n  try {\n    const aiResponse = item.json.choices?.[0]?.message?.content || '{}';\n    let aiData = {};\n    \n    try {\n      aiData = JSON.parse(aiResponse);\n    } catch (e) {\n      console.log('Failed to parse AI response:', aiResponse);\n      aiData = {\n        emotion: 'unknown',\n        topics: [],\n        reputation_impact: 'neutral',\n        viral_score: 0,\n        action_required: false,\n        action_reason: 'N/A',\n        summary: 'Unable to analyze'\n      };\n    }\n    \n    // Get sentiment data from previous node\n    const sentimentNode = $('AI Sentiment Analysis');\n    const sentiment = sentimentNode.item.json;\n    \n    items.push({\n      json: {\n        ...item.json,\n        sentiment: sentiment.sentiment || 'neutral',\n        sentiment_score: sentiment.sentimentScore || 0,\n        emotion: aiData.emotion,\n        topics: aiData.topics || [],\n        reputation_impact: aiData.reputation_impact,\n        viral_score: aiData.viral_score || 0,\n        action_required: aiData.action_required,\n        action_reason: aiData.action_reason,\n        summary: aiData.summary,\n        analyzed_at: new Date().toISOString()\n      }\n    });\n  } catch (error) {\n    console.log('Error combining analysis:', error);\n  }\n}\n\nreturn items;"
+      },
+      "id": "75df9de1-c23a-417f-9ead-5a2d4be12896",
+      "name": "Combine Analysis Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "viral-check",
+              "leftValue": "={{ $json.engagement.total }}",
+              "rightValue": "={{ $('Configuration').item.json.viralThreshold }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "reputation-risk",
+              "leftValue": "={{ $json.reputation_impact }}",
+              "rightValue": "risk",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "action-required",
+              "leftValue": "={{ $json.action_required }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combineOperation": "any"
+        },
+        "options": {}
+      },
+      "id": "0387525b-a784-45aa-a245-c7bca91d92a0",
+      "name": "Check Viral/Risk Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [
+        1728,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Configuration').item.json.telegramChatId }}",
+        "text": "=🚨 **URGENT ALERT**\n\n**Platform:** {{ $json.platform }}\n**Status:** {{ $json.engagement.total >= $('Configuration').item.json.viralThreshold ? '🔥 VIRAL' : '⚠️ REPUTATION RISK' }}\n\n**Content:**\n{{ $json.text.substring(0, 300) }}{{ $json.text.length > 300 ? '...' : '' }}\n\n**Sentiment:** {{ $json.sentiment }} ({{ Math.round($json.sentiment_score * 100) }}%)\n**Emotion:** {{ $json.emotion }}\n**Impact:** {{ $json.reputation_impact }}\n\n**Engagement:** {{ $json.engagement.total }} ({{ $json.engagement.likes }} likes, {{ $json.engagement.retweets || $json.engagement.upvotes || $json.engagement.replies }} shares/comments)\n\n**Viral Score:** {{ $json.viral_score }}/100\n\n**Action Required:** {{ $json.action_required ? '✅ YES' : '❌ NO' }}\n{{ $json.action_required ? '**Reason:** ' + $json.action_reason : '' }}\n\n**Link:** {{ $json.url }}\n\n**Author:** @{{ $json.author }}\n**Time:** {{ $json.created_at }}",
+        "additionalFields": {}
+      },
+      "id": "13ef9c2b-45f7-48d2-aaf6-5c43fa719e20",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1984,
+        192
+      ],
+      "webhookId": "857c6529-270c-450a-9a19-f7e9e9eeb99d",
+      "credentials": {
+        "telegramApi": {
+          "id": "CG5IKuGimArjdSzw",
+          "name": "Telegram account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Configuration').item.json.googleSheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Mentions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.timestamp }}",
+            "Platform": "={{ $json.platform }}",
+            "Author": "={{ $json.author }}",
+            "Text": "={{ $json.text }}",
+            "URL": "={{ $json.url }}",
+            "Engagement_Total": "={{ $json.engagement.total }}",
+            "Sentiment": "={{ $json.sentiment }}",
+            "Sentiment_Score": "={{ $json.sentiment_score }}",
+            "Emotion": "={{ $json.emotion }}",
+            "Topics": "={{ $json.topics.join(', ') }}",
+            "Reputation_Impact": "={{ $json.reputation_impact }}",
+            "Viral_Score": "={{ $json.viral_score }}",
+            "Action_Required": "={{ $json.action_required }}",
+            "Summary": "={{ $json.summary }}"
+          },
+          "matchingColumns": [
+            "URL"
+          ],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "Platform",
+              "displayName": "Platform",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "Author",
+              "displayName": "Author",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "Text",
+              "displayName": "Text",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "Engagement_Total",
+              "displayName": "Engagement_Total",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "Sentiment",
+              "displayName": "Sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            },
+            {
+              "id": "Sentiment_Score",
+              "displayName": "Sentiment_Score",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "Emotion",
+              "displayName": "Emotion",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            },
+            {
+              "id": "Topics",
+              "displayName": "Topics",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            },
+            {
+              "id": "Reputation_Impact",
+              "displayName": "Reputation_Impact",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            },
+            {
+              "id": "Viral_Score",
+              "displayName": "Viral_Score",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "Action_Required",
+              "displayName": "Action_Required",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "boolean"
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d9a3ee2d-84b5-43cb-932b-f26f44adfeb9",
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1760,
+        528
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "oklrTZRmBeNSd0UJ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "43ebf809-90d5-4a41-9879-97eda72b93e5",
+      "name": "Aggregate Report Data",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate comprehensive weekly report\nconst config = $('Configuration').item.json;\nconst allMentions = $input.all();\n\n// Calculate statistics\nconst total = allMentions.length;\nconst byPlatform = {};\nconst bySentiment = { positive: 0, negative: 0, neutral: 0 };\nconst byImpact = { positive: 0, negative: 0, neutral: 0, risk: 0 };\nconst topMentions = [];\nconst actionRequired = [];\nconst topics = {};\n\nfor (const item of allMentions) {\n  const data = item.json;\n  \n  // Platform stats\n  byPlatform[data.platform] = (byPlatform[data.platform] || 0) + 1;\n  \n  // Sentiment stats\n  const sentiment = (data.sentiment || 'neutral').toLowerCase();\n  if (sentiment.includes('positive')) bySentiment.positive++;\n  else if (sentiment.includes('negative')) bySentiment.negative++;\n  else bySentiment.neutral++;\n  \n  // Impact stats\n  const impact = (data.reputation_impact || 'neutral').toLowerCase();\n  byImpact[impact] = (byImpact[impact] || 0) + 1;\n  \n  // Track topics\n  if (data.topics) {\n    for (const topic of data.topics) {\n      topics[topic] = (topics[topic] || 0) + 1;\n    }\n  }\n  \n  // Top engagement mentions\n  if (data.engagement.total >= config.viralThreshold) {\n    topMentions.push(data);\n  }\n  \n  // Action required items\n  if (data.action_required) {\n    actionRequired.push(data);\n  }\n}\n\n// Sort top mentions by engagement\ntopMentions.sort((a, b) => b.engagement.total - a.engagement.total);\n\n// Get top topics\nconst topTopics = Object.entries(topics)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 10)\n  .map(([topic, count]) => ({ topic, count }));\n\n// Calculate trends (compare to previous week - simplified)\nconst sentimentTrend = bySentiment.positive > bySentiment.negative ? '📈 Improving' : \n                       bySentiment.positive < bySentiment.negative ? '📉 Declining' : '➡️ Stable';\n\nconst report = {\n  period: `Week ending ${new Date().toLocaleDateString()}`,\n  brandName: config.brandName,\n  summary: {\n    total_mentions: total,\n    viral_mentions: topMentions.length,\n    action_required: actionRequired.length,\n    sentiment_trend: sentimentTrend\n  },\n  platforms: byPlatform,\n  sentiment: {\n    positive: bySentiment.positive,\n    negative: bySentiment.negative,\n    neutral: bySentiment.neutral,\n    positive_pct: Math.round((bySentiment.positive / total) * 100),\n    negative_pct: Math.round((bySentiment.negative / total) * 100)\n  },\n  reputation_impact: byImpact,\n  top_topics: topTopics,\n  viral_mentions: topMentions.slice(0, 10),\n  action_items: actionRequired,\n  generated_at: new Date().toISOString()\n};\n\nreturn [{ json: report }];"
+      },
+      "id": "9cb2dbb2-d33b-4aaa-baa2-b7977eed0fef",
+      "name": "Generate Weekly Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2208,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate HTML email report\nconst report = $input.first().json;\n\nconst html = `\n<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }\n    h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }\n    h2 { color: #34495e; margin-top: 30px; }\n    .summary-box { background: #f8f9fa; border-left: 4px solid #3498db; padding: 15px; margin: 20px 0; }\n    .stat { display: inline-block; margin: 10px 20px 10px 0; }\n    .stat-number { font-size: 2em; font-weight: bold; color: #3498db; }\n    .stat-label { font-size: 0.9em; color: #7f8c8d; }\n    .sentiment-positive { color: #27ae60; }\n    .sentiment-negative { color: #e74c3c; }\n    .sentiment-neutral { color: #95a5a6; }\n    .platform-tag { display: inline-block; background: #3498db; color: white; padding: 3px 10px; border-radius: 3px; margin: 2px; font-size: 0.85em; }\n    .mention-card { background: white; border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }\n    .mention-header { display: flex; justify-content: space-between; margin-bottom: 10px; }\n    .engagement { color: #3498db; font-weight: bold; }\n    .viral-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 3px; font-size: 0.8em; }\n    table { width: 100%; border-collapse: collapse; margin: 20px 0; }\n    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }\n    th { background: #34495e; color: white; }\n    .topic-badge { background: #ecf0f1; padding: 5px 10px; margin: 3px; border-radius: 3px; display: inline-block; }\n  </style>\n</head>\n<body>\n  <h1>🎯 Personal Brand Sentiment Report</h1>\n  \n  <div class=\"summary-box\">\n    <h2>📊 Executive Summary</h2>\n    <p><strong>Brand:</strong> ${report.brandName}</p>\n    <p><strong>Period:</strong> ${report.period}</p>\n    <p><strong>Sentiment Trend:</strong> ${report.summary.sentiment_trend}</p>\n  </div>\n  \n  <div style=\"margin: 30px 0;\">\n    <div class=\"stat\">\n      <div class=\"stat-number\">${report.summary.total_mentions}</div>\n      <div class=\"stat-label\">Total Mentions</div>\n    </div>\n    <div class=\"stat\">\n      <div class=\"stat-number\" style=\"color: #e74c3c;\">${report.summary.viral_mentions}</div>\n      <div class=\"stat-label\">Viral Posts</div>\n    </div>\n    <div class=\"stat\">\n      <div class=\"stat-number\" style=\"color: #f39c12;\">${report.summary.action_required}</div>\n      <div class=\"stat-label\">Action Required</div>\n    </div>\n  </div>\n  \n  <h2>🌐 Platform Breakdown</h2>\n  <div>\n    ${Object.entries(report.platforms).map(([platform, count]) => \n      `<span class=\"platform-tag\">${platform}: ${count}</span>`\n    ).join('')}\n  </div>\n  \n  <h2>😊 Sentiment Analysis</h2>\n  <table>\n    <tr>\n      <th>Sentiment</th>\n      <th>Count</th>\n      <th>Percentage</th>\n    </tr>\n    <tr>\n      <td class=\"sentiment-positive\">✅ Positive</td>\n      <td>${report.sentiment.positive}</td>\n      <td>${report.sentiment.positive_pct}%</td>\n    </tr>\n    <tr>\n      <td class=\"sentiment-negative\">❌ Negative</td>\n      <td>${report.sentiment.negative}</td>\n      <td>${report.sentiment.negative_pct}%</td>\n    </tr>\n    <tr>\n      <td class=\"sentiment-neutral\">➖ Neutral</td>\n      <td>${report.sentiment.neutral}</td>\n      <td>${100 - report.sentiment.positive_pct - report.sentiment.negative_pct}%</td>\n    </tr>\n  </table>\n  \n  <h2>🏆 Top Topics</h2>\n  <div>\n    ${report.top_topics.map(topic => \n      `<span class=\"topic-badge\">${topic.topic} (${topic.count})</span>`\n    ).join('')}\n  </div>\n  \n  ${report.viral_mentions.length > 0 ? `\n  <h2>🔥 Viral Mentions (100+ Engagement)</h2>\n  ${report.viral_mentions.map(mention => `\n    <div class=\"mention-card\">\n      <div class=\"mention-header\">\n        <div>\n          <span class=\"platform-tag\">${mention.platform}</span>\n          <span class=\"viral-badge\">VIRAL</span>\n        </div>\n        <div class=\"engagement\">⚡ ${mention.engagement.total} engagements</div>\n      </div>\n      <p><strong>@${mention.author}:</strong> ${mention.text.substring(0, 200)}...</p>\n      <p><strong>Sentiment:</strong> <span class=\"sentiment-${mention.sentiment.toLowerCase()}\">${mention.sentiment}</span> | \n         <strong>Impact:</strong> ${mention.reputation_impact}</p>\n      <p><a href=\"${mention.url}\" target=\"_blank\">View Original →</a></p>\n    </div>\n  `).join('')}\n  ` : ''}\n  \n  ${report.action_items.length > 0 ? `\n  <h2>⚠️ Action Required</h2>\n  ${report.action_items.map(item => `\n    <div class=\"mention-card\" style=\"border-left: 4px solid #e74c3c;\">\n      <div class=\"mention-header\">\n        <span class=\"platform-tag\">${item.platform}</span>\n        <div class=\"engagement\">⚡ ${item.engagement.total} engagements</div>\n      </div>\n      <p><strong>@${item.author}:</strong> ${item.text.substring(0, 200)}...</p>\n      <p><strong>Why Action Needed:</strong> ${item.action_reason}</p>\n      <p><strong>Summary:</strong> ${item.summary}</p>\n      <p><a href=\"${item.url}\" target=\"_blank\">View & Respond →</a></p>\n    </div>\n  `).join('')}\n  ` : ''}\n  \n  <h2>💡 Recommendations</h2>\n  <ul>\n    ${report.sentiment.negative_pct > 30 ? '<li>⚠️ High negative sentiment detected. Consider addressing common concerns.</li>' : ''}\n    ${report.summary.viral_mentions > 0 ? '<li>🔥 You have viral content! Engage with high-performing posts.</li>' : ''}\n    ${report.summary.action_required > 0 ? `<li>⚡ ${report.summary.action_required} items need immediate attention.</li>` : ''}\n    ${report.sentiment.positive_pct > 60 ? '<li>✅ Strong positive sentiment! Consider amplifying this momentum.</li>' : ''}\n  </ul>\n  \n  <div style=\"margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #7f8c8d; font-size: 0.9em;\">\n    <p>Generated on ${new Date(report.generated_at).toLocaleString()}</p>\n    <p>This is an automated report from your Personal Brand Sentiment Tracker.</p>\n  </div>\n</body>\n</html>\n`;\n\nreturn [{ json: { html, subject: `📊 Brand Report: ${report.brandName} - ${report.period}` } }];"
+      },
+      "id": "3a4d5c1e-f8b7-418f-92a7-7af174729d22",
+      "name": "Format HTML Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Configuration').item.json.emailRecipients }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "d9d70365-df9e-4f21-af0d-829b60840b1b",
+      "name": "Send Weekly Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2640,
+        528
+      ],
+      "webhookId": "ea9f03bd-e771-4be6-a0fa-c4b1218ce4a2",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "3o9bAYjIuE7Kau7l",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze this social media mention and return ONLY valid JSON:\n\nPlatform: {{ $json.platform }}\nAuthor: {{ $json.author }}\nEngagement: {{ $json.engagement.total }} (likes: {{ $json.engagement.likes }}, comments: {{ $json.engagement.comments || $json.engagement.replies || 0 }})\nContent: {{ $json.text }}\n\nReturn this exact JSON structure:\n{\n  \"sentiment\": \"positive|negative|neutral\",\n  \"sentiment_score\": 0.0-1.0,\n  \"emotion\": \"excitement|frustration|trust|curiosity|anger|joy|sadness|fear|surprise|neutral\",\n  \"topics\": [\"topic1\", \"topic2\", \"topic3\"],\n  \"reputation_impact\": \"positive|negative|neutral|risk\",\n  \"viral_score\": 0-100,\n  \"action_required\": true|false,\n  \"action_reason\": \"why action is needed or 'none'\",\n  \"summary\": \"one sentence summary\"\n}\n\nRules:\n- sentiment_score: 0.0=very negative, 0.5=neutral, 1.0=very positive\n- viral_score: based on engagement, content quality, and shareability (0-100)\n- reputation_impact: \"risk\" if urgent negative attention needed\n- action_required: true if needs response (questions, complaints, high engagement)\n- topics: max 5 relevant keywords\n- Return ONLY the JSON, no explanation",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1104,
+        304
+      ],
+      "id": "9a20213c-1ef5-410c-9918-f412622d8e5e",
+      "name": "Sentiment Analysis Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        976,
+        512
+      ],
+      "id": "53cd4e5a-eef0-43e4-a71d-0145f7f34026",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "mTU0qrB9NCnt4Ocr",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        512
+      ],
+      "id": "7e3f8c40-b7ce-4b6f-9630-833fcaba5ba4",
+      "name": "Simple Memory"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Twitter/X Search",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Reddit Search",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "YouTube Search",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Alerts (Blogs/News)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Podcast Mentions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Twitter/X Search": {
+      "main": [
+        [
+          {
+            "node": "Parse Twitter Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reddit Search": {
+      "main": [
+        [
+          {
+            "node": "Parse Reddit Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Search": {
+      "main": [
+        [
+          {
+            "node": "Get YouTube Comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get YouTube Comments": {
+      "main": [
+        [
+          {
+            "node": "Parse YouTube Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Alerts (Blogs/News)": {
+      "main": [
+        [
+          {
+            "node": "Parse Blog/News Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Podcast Mentions": {
+      "main": [
+        [
+          {
+            "node": "Parse Podcast Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Twitter Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Reddit Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse YouTube Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Blog/News Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Podcast Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge All Sources": {
+      "main": [
+        [
+          {
+            "node": "Remove Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Duplicates": {
+      "main": [
+        [
+          {
+            "node": "Sentiment Analysis Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Analysis Data": {
+      "main": [
+        [
+          {
+            "node": "Check Viral/Risk Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Viral/Risk Status": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Report Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Weekly Report": {
+      "main": [
+        [
+          {
+            "node": "Format HTML Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format HTML Email": {
+      "main": [
+        [
+          {
+            "node": "Send Weekly Email Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sentiment Analysis Agent": {
+      "main": [
+        [
+          {
+            "node": "Combine Analysis Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Sentiment Analysis Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Sentiment Analysis Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "86c2f98a-90e7-4525-884f-c0d1ef208b5b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bda284ba69a5bf5f0d731ca0a44a60340df82eff9ee04a27b6a86d364a4b86e3"
+  },
+  "id": "VrD7YOVx8FQjb8sb",
+  "tags": []
+}

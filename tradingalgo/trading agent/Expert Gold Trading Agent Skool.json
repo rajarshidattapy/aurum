@@ -1,0 +1,559 @@
+{
+  "name": "Expert Gold Trading Agent Skool",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -816,
+        240
+      ],
+      "id": "f4c2da0c-9c3f-46f3-a3b0-09505f38abf7",
+      "name": "Telegram Trigger",
+      "webhookId": "75e63d64-fd31-4b3b-8eda-c1cedcf97aee",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.twelvedata.com/time_series",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "interval",
+              "value": "1min"
+            },
+            {
+              "name": "outputsize",
+              "value": "100"
+            },
+            {
+              "name": "apikey",
+              "value": "your api key"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -464,
+        240
+      ],
+      "id": "b677c7b6-cb2f-40a6-93b8-53eaa958c68d",
+      "name": "1min chart"
+    },
+    {
+      "parameters": {
+        "url": "https://api.twelvedata.com/time_series",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "interval",
+              "value": "15min"
+            },
+            {
+              "name": "outputsize",
+              "value": "100"
+            },
+            {
+              "name": "apikey",
+              "value": "your api key"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -480,
+        48
+      ],
+      "id": "3c8a9169-1f78-44c1-9ff5-24fe9922d1ce",
+      "name": "15 min chart"
+    },
+    {
+      "parameters": {
+        "url": "https://api.twelvedata.com/time_series",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "interval",
+              "value": "1h"
+            },
+            {
+              "name": "outputsize",
+              "value": "100"
+            },
+            {
+              "name": "apikey"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        416
+      ],
+      "id": "efc497ba-8ece-45c0-ad85-14723bb7b905",
+      "name": "1hr chart"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -128,
+        224
+      ],
+      "id": "4969b7b6-4a9c-4b59-98a9-0e71be7f10d1",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        80,
+        224
+      ],
+      "id": "0a9902f7-9bb9-4e39-8634-ce702e7c7411",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all incoming items\nconst inputItems = $input.all();\n\nlet allCandles = [];\nlet symbol = null;\n\n// Loop through inputs\nfor (const item of inputItems) {\n    if (!item.json.data) continue;\n\n    const datasets = item.json.data;\n\n    for (const set of datasets) {\n        if (!set.values || set.values.length === 0) continue;\n\n        // Save symbol once\n        if (!symbol && set.meta?.symbol) {\n            symbol = set.meta.symbol;\n        }\n\n        const interval = set.meta?.interval || \"\";\n\n        // Map raw values into standard candle structure\n        const mapped = set.values.map(v => ({\n            interval,\n            isoTime: v.datetime,\n            epochMs: new Date(v.datetime.replace(\" \", \"T\") + \"Z\").getTime(),\n            open: parseFloat(v.open),\n            high: parseFloat(v.high),\n            low: parseFloat(v.low),\n            close: parseFloat(v.close)\n        }));\n\n        allCandles.push(...mapped);\n    }\n}\n\n// SAFETY CHECK — if nothing parsed, stop early\nif (allCandles.length === 0) {\n    return [\n        {\n            json: {\n                error: \"NO_CANDLE_DATA\",\n                message: \"Input JSON contained no usable candles.\"\n            }\n        }\n    ];\n}\n\n// Sort candles by time ASC\nallCandles.sort((a, b) => a.epochMs - b.epochMs);\n\n// Latest valid close\nconst latest = allCandles[allCandles.length - 1];\n\n// Return final structured output\nreturn [\n    {\n        json: {\n            symbol: symbol || \"UNKNOWN\",\n            latestPrice: latest.close,\n            latestTime: latest.isoTime,\n            totalCandles: allCandles.length,\n            candles: allCandles\n        }\n    }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        224
+      ],
+      "id": "d1bb108d-e325-417e-a9a4-d223a95fce2e",
+      "name": "Code"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        496,
+        288
+      ],
+      "id": "cd99f7ed-fb99-41bb-9297-057375e5f105",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        704,
+        288
+      ],
+      "id": "58a2c001-71f9-4db6-9b08-19a6077d0a32",
+      "name": "Aggregate1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You will receive JSON data containing:\n\nMarket Price: {{$json.data[0].latestPrice}}\n\nLatest Time: {{$json.data[0].latestTime}}\n\nCandles Array: {{$json.data[0].candles}}\n\nNews Sentiment JSON: {{$json.data[1].message.content}}\n\nYou are an expert XAU/USD intraday price action trader.\nYour task is to output ONE trade signal only, strictly following:\n\n====================================================\n\nPRICE ACTION WEIGHTING\n\n====================================================\n\n1H STRUCTURE = 60% decision weight\n\nIdentify trend (HH/HL = bullish, LH/LL = bearish).\n\nThis is the primary bias. Never override structure.\n\n15M MOMENTUM = 25% weight\n\nImpulse vs correction\n\nStrength of pushes\n\nOrderflow direction\n\n1M TRIGGER = 10% weight\n\nEngulfing\n\nBOS + Retest\n\nRejection wick\n\nFVG fill\n\nLiquidity sweep → continuation\n\nNEWS SENTIMENT = 5% weight\n\nParse sentiment from JSON\n\nApply only as a small bias, never reversing structure\n\n====================================================\n\nRISK RULES (MANDATORY)\n\n====================================================\n\nMAX SL = 150 pips (1.50)\n\nTP must ALWAYS exceed SL\n\nNEVER produce 1:1 RR — minimum RR is 1:1.2+\n\nEntry must be within ±50 points (500 pips) of market price\n\nTP1 = nearest opposing liquidity\n\nTP2 = minimum +250 pips AND must align with logical HTF liquidity\n\nPip conversion:\n\n1.00 = 100 pips on XAUUSD.\n\n====================================================\n\nENTRY RULES\n\n====================================================\n\nChoose 1 valid PA entry type:\n\nBreak + Retest\n\nFVG Fill\n\nOB Mitigation\n\nLiquidity sweep → BOS → continuation\n\n====================================================\n\nOUTPUT FORMAT (MANDATORY)\n\n====================================================\n\nOutput ONLY ONE of these templates:\n\nXAUUSD BUY NOW\nMy Entry: {entry}\nStop Loss: {sl} ({sl_pips} pips)\nTake Profit 1: {tp1} (+{tp1_pips} pips)\nTake Profit 2: {tp2} (+{tp2_pips} pips)\n\nSummary:\n\nHTF: {1H structure}\n\nM15: {momentum}\n\nM1: {trigger}\n\nSentiment: {bullish/bearish/mixed + reasoning}\n\nRR: {rr1}, {rr2}\n\nOR\n\nXAUUSD SELL NOW\nMy Entry: {entry}\nStop Loss: {sl} ({sl_pips} pips)\nTake Profit 1: {tp1} (+{tp1_pips} pips)\nTake Profit 2: {tp2} (+{tp2_pips} pips)\n\nSummary:\n\nHTF: {1H structure}\n\nM15: {momentum}\n\nM1: {trigger}\n\nSentiment: {bullish/bearish/mixed + reasoning}\n\nRR: {rr1}, {rr2}\n\n====================================================\n\nSTRICT VALIDATION RULES\n\n====================================================\n\nNEVER output text outside the template\n\nNEVER break format\n\nNEVER exceed 150-pip SL\n\nNEVER give RR below 1:1.2\n\nALWAYS base final direction on 1H structure\n\nIf PA is mixed, sentiment may tilt direction slightly\n\nYou MUST return exactly one of the two formats\n\nNO surrounding quotes, NO markdown blocks, NO explanations\n\nOutput only the final trade signal template\n\nEND OF SYSTEM PROMPT",
+        "options": {
+          "systemMessage": "=You will ONLY use the following fields:\n\nMarket Price → {{ $json.data[0].latestPrice }}\nLatest Time → {{ $json.data[0].latestTime }}\nCandles → {{ $json.data[0].candles }}\nNews → {{ $json.data[1].message.content }}\n\nDo NOT use:\n- any other field\n- any historical candle price as live price\n- any numeric value inside candles as the current price\n\nIf any price is not equal to {{ $json.data[0].latestPrice }}, it is INVALID.\n\nYou have a built-in calculator.  \nYou must calculate all numbers using explicit arithmetic, not estimation.\n\nRules:\n- Always compute pip distances using: 1.00 = 100 pips for XAUUSD.\n- Always verify Entry, SL, TP1, and TP2 are close to the live market price.\n- Never output values that deviate more than 50 points (500 pips) from the market price unless explicitly justified.\n- Always compute:\n    distance_to_sl = abs(entry - sl)\n    distance_to_tp1 = abs(tp1 - entry)\n    distance_to_tp2 = abs(tp2 - entry)\n- Always show correct pip conversions:\n    pips = distance * 100\n- Never hallucinate prices. Always anchor all outputs to:\n    Market Price = {{$json.data[0].latestPrice}}\n\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        912,
+        288
+      ],
+      "id": "961b6931-8e04-4568-bbca-32c83b5d7327",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1296,
+        288
+      ],
+      "id": "d9a5b78f-0bf0-4e51-adea-d255ad57ba24",
+      "name": "Send a text message",
+      "webhookId": "3e3874e9-9073-4efb-80af-71f943386fa6",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5.1",
+          "mode": "list",
+          "cachedResultName": "gpt-5.1"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        832,
+        496
+      ],
+      "id": "4fa53026-8f4b-43dc-897c-410f1da87df3",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "pG6IXZt7By7WBYLf",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.data[0].symbol }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        976,
+        496
+      ],
+      "id": "9747c76d-6d8e-4eff-8d36-b34cdbc5fb49",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-5",
+          "mode": "list",
+          "cachedResultName": "GPT-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Analyze the following news articles for sentiment toward XAUUSD:\n\n[\n  { \"title\": \"Gold rises as dollar weakens\", \"description\": \"XAU/USD gained as the USD fell after dovish Fed commentary.\" },\n  { \"title\": \"Fed minutes hint at possible rate cuts\", \"description\": \"Traders expect lower rates later this year, boosting gold demand.\" },\n  { \"title\": \"Geopolitical tensions ease in Middle East\", \"description\": \"Reduced safe-haven demand may weigh on gold prices.\" }\n]\n"
+            },
+            {
+              "content": "You are a financial news sentiment analysis engine. \nYour task is to analyze each news item about a financial instrument and return:\n- sentiment score ∈ [-1.0, 1.0] where:\n  -1.0 = very bearish, -0.5 = bearish, 0.0 = neutral, +0.5 = bullish, +1.0 = very bullish\n- sentiment label: \"bearish\", \"neutral\", or \"bullish\"\n- impact: classify as \"low\", \"medium\", or \"high\" based on how strongly it could affect the instrument (e.g., central bank policy, geopolitical conflict = high; analyst opinion = low).\n- reasoning: short explanation (1–2 lines) why this sentiment was chosen.\n\nRules:\n- Focus only on the likely effect on the specified instrument (e.g., XAUUSD).\n- Be concise, structured, and consistent.\n- Always return valid JSON.\n",
+              "role": "system"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        0,
+        480
+      ],
+      "id": "f6502091-9ccc-4013-8888-39619c6f69ca",
+      "name": "Sentiment analysis",
+      "credentials": {
+        "openAiApi": {
+          "id": "pG6IXZt7By7WBYLf",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "BUY XAU/USD\n\nMy Entry: 3326.00\n\nStop Loss: 3318.00 (80 pips)\n\nTP1: 3338.00 (120 pips)\nTP2: 3350.00 (240 pips",
+        "width": 224
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        736,
+        848
+      ],
+      "id": "1ce75447-d5f7-4b96-b6e7-398502af9f4d",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolCalculator",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        496
+      ],
+      "id": "e82babb1-1d9e-4d36-9326-2eaf7f07fff9",
+      "name": "Calculator"
+    },
+    {
+      "parameters": {
+        "messages": {
+          "message": [
+            {
+              "content": "You are a financial news crawler.\n\nYour task:\nSearch the entire internet, news outlets, economic calendars, market commentary, analyst reports, central bank statements, and financial media to retrieve the most relevant and recent news affecting:\n\nXAU/USD (Gold vs USD)\n\nOutput MUST be a JSON array of up to 6 items.\n\nFor each item include:\n- title\n- sentiment_score (-1 to +1)\n- sentiment_label (\"bullish\", \"bearish\", or \"mixed\")\n- impact (\"high\", \"medium\", or \"low\")\n- reasoning (one short sentence)\n- source (site or publication)\n- url\n\nSentiment rules:\n- Bullish if: dollar weakness, rate cuts, geopolitical tension, inflation fears, safe-haven flows.\n- Bearish if: strong dollar, risk-on sentiment, rate hikes, rising yields.\n- High impact only if relevant to gold volatility (Fed, CPI, NFP, PCE, dollar moves, yields).\n\nOutput only valid JSON. No explanations outside the JSON payload.\n"
+            }
+          ]
+        },
+        "options": {},
+        "requestOptions": {}
+      },
+      "type": "n8n-nodes-base.perplexity",
+      "typeVersion": 1,
+      "position": [
+        -624,
+        576
+      ],
+      "id": "117c3383-dec3-4b7f-83ee-bd4a1676bf7d",
+      "name": "Message a model",
+      "credentials": {
+        "perplexityApi": {
+          "id": "TASIukeusULHTjnI",
+          "name": "Perplexity account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "1min chart",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "15 min chart",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "1hr chart",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "15 min chart": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1min chart": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "1hr chart": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sentiment analysis": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Calculator": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Sentiment analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "d1bf9f56-2dab-4c2f-af48-f56dddb1add9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bda284ba69a5bf5f0d731ca0a44a60340df82eff9ee04a27b6a86d364a4b86e3"
+  },
+  "id": "WU46Q30nmLdWiw7x",
+  "tags": []
+}

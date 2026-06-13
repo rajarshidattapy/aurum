@@ -1,0 +1,46 @@
+https://amanxai.com/2024/11/28/building-an-etl-pipeline-using-pyspark/?mcp_token=eyJwaWQiOjM1ODE1NTMsInNpZCI6NTk4NzgxMDQ2LCJheCI6IjdhMTAwMWU0ZTYyZTMxNzAwODJkMzYzOTcxN2I3ODdjIiwidHMiOjE3NTg0NjI1NTgsImV4cCI6MTc2MDg4MTc1OH0.PVVbHTj-QJJoNYUQGAZA9HiiQnDBbYegxz0A9791Bbg&fbclid=PAT01DUAM84bNleHRuA2FlbQIxMAABp76tQ1X-V_ZL4sRAQv4gULCvft2w3NDFPa65i5EgLt-g7cL6jHAbgAMqPhPx_aem_2lBnhXKClBJu97pgKkzb7w
+
+
+math/statistics
+python
+pandas
+numpy
+matplotlib
+mysql
+scikit learn
+xgboost
+pytorch
+transformers
+sbert
+fastapi
+dvc
+mlflow
+pyspark
+docker
+airflow
+ultralytics
+spacy
+opencv
+langchain
+qdrant
+
+
+
+https://zerodha.com/varsity/
+
+
+
+Your ML model with 0.92 accuracy in a notebook is worth exactly $0.
+
+It only starts making money the day it’s in production, monitored, and retrained automatically.
+
+That’s not data science.
+That’s MLOps.
+
+The best companies now deploy models 30+ times per month with zero manual steps.
+
+The rest are still debugging pickle files and praying.
+
+2025 reality: If you don’t have a model registry, CI/CD for ML, and drift alerts, you’re running a science fair, not an AI business.
+
+What’s the one MLOps piece you’re missing right now? Let me know below.
