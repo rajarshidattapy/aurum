@@ -1,0 +1,902 @@
+const { createClient } = require("redis");
+const { PrismaClient } = require("../db/generated/client");
+
+class ExchangeEngine {
+  constructor() {
+    this.redisClient = createClient();
+    this.prisma = new PrismaClient();
+    
+    this.orderbook = {}; // In-memory orderbook
+    this.balances = {}; // In-memory user balances
+    this.topics = []; // Topics loaded from database
+    
+    // Queue for database operations
+    this.dbQueue = "db_operations";
+  }
+
+  async initialize() {
+    await this.redisClient.connect();
+    console.log("Redis client connected");
+
+    try {
+      // Load topics from database
+      await this.loadTopics();
+      
+      // Load existing orders from database
+      await this.loadExistingOrders();
+      
+      console.log("Exchange Engine initialized successfully");
+    } catch (error) {
+      console.error("Error initializing exchange engine:", error);
+      throw error;
+    }
+  }
+
+  async loadTopics() {
+    try {
+      this.topics = await this.prisma.topic.findMany();
+      console.log(`Loaded ${this.topics.length} topics from database`);
+    } catch (error) {
+      console.error("Error loading topics:", error);
+      throw error;
+    }
+  }
+
+  async loadExistingOrders() {
+    try {
+      // Get all open orders from the database
+      const openOrders = await this.prisma.order.findMany({
+        where: {
+          status: "OPEN"
+        },
+        include: {
+          user: true,
+          topic: true
+        }
+      });
+      
+      console.log(`Loading ${openOrders.length} existing orders into orderbook`);
+      
+      // Group the orders by topic and add to orderbook
+      for (const order of openOrders) {
+        const marketId = `${order.topicId}-${order.shareType.toLowerCase()}-usd`;
+        
+        if (!this.orderbook[marketId]) {
+          this.orderbook[marketId] = {
+            bids: [],
+            asks: []
+          };
+        }
+        
+        const orderEntry = {
+          price: parseFloat(order.price),
+          quantity: parseFloat(order.remainingQuantity),
+          userId: order.user.username, // Assuming username is used as userId
+          orderId: order.id.toString(),
+          timestamp: order.createdAt.getTime()
+        };
+        
+        if (order.side === "BUY") {
+          this.orderbook[marketId].bids.push(orderEntry);
+        } else {
+          this.orderbook[marketId].asks.push(orderEntry);
+        }
+      }
+      
+      // Sort the orderbooks
+      for (const marketId in this.orderbook) {
+        this.orderbook[marketId].bids.sort((a, b) => b.price - a.price || a.timestamp - b.timestamp);
+        this.orderbook[marketId].asks.sort((a, b) => a.price - b.price || a.timestamp - b.timestamp);
+      }
+      
+      console.log("Existing orders loaded into orderbook");
+    } catch (error) {
+      console.error("Error loading existing orders:", error);
+      throw error;
+    }
+  }
+
+  async loadUserBalance(userId) {
+    // Check if the balance is already loaded
+    if (this.balances[userId]) {
+      return this.balances[userId];
+    }
+    
+    try {
+      // Find the user in the database
+      const user = await this.prisma.user.findUnique({
+        where: {
+          username: userId
+        },
+        include: {
+          balances: {
+            include: {
+              topic: true
+            }
+          }
+        }
+      });
+      
+      if (!user) {
+        console.error(`User ${userId} not found in database`);
+        return null;
+      }
+      
+      // Create the balance object
+      const balanceObj = {
+        USD: parseFloat(user.balance)
+      };
+      
+      // Add YES/NO shares for each topic
+      for (const balance of user.balances) {
+        // Format: topicId-yes-usd
+        balanceObj[`${balance.topicId}-yes-usd`] = parseFloat(balance.yesShares);
+        // Format: topicId-no-usd
+        balanceObj[`${balance.topicId}-no-usd`] = parseFloat(balance.noShares);
+      }
+      
+      // Cache the balance
+      this.balances[userId] = balanceObj;
+      
+      console.log(`Loaded balance for user ${userId}: `, balanceObj);
+      return balanceObj;
+    } catch (error) {
+      console.error(`Error loading balance for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  // Helper method to track balance changes with logging
+  trackBalanceChange(userId, asset, oldBalance, newBalance, reason) {
+    console.log(`Balance change for ${userId} on ${asset}: ${oldBalance} → ${newBalance} (${reason})`);
+    
+    // Queue the update
+    this.queueDbOperation({
+      type: "UPDATE_BALANCE",
+      data: {
+        userId,
+        asset,
+        newBalance,
+        reason
+      }
+    });
+  }
+
+  // Queue a database operation
+  queueDbOperation(operation) {
+    // Add timestamp to track when the operation was queued
+    const queueItem = {
+      ...operation,
+      timestamp: Date.now()
+    };
+    
+    // Push to the database operations queue
+    this.redisClient.lPush(this.dbQueue, JSON.stringify(queueItem));
+    console.log(`Queued DB operation: ${operation.type}`);
+  }
+
+  async start() {
+    try {
+      await this.initialize();
+      console.log("Exchange Engine started. Listening for events...");
+      
+      while (true) {
+        try {
+          // Pull the next event from the queue
+          const result = await this.redisClient.brPop("messages", 0);
+          
+          // Extract the queue name and message
+          const queue = result.key;
+          const messageText = result.element;
+          
+          // Parse the message
+          const parsedMessage = JSON.parse(messageText);
+          const clientId = parsedMessage.clientId;
+          const event = parsedMessage.message;
+          console.log(`Processing event from client ${clientId}: ${event.type}`);
+          
+          // Process the event
+          const response = await this.processEvent(event, clientId);
+          
+          // Publish the response to the pub/sub channel
+          await this.redisClient.publish(clientId, JSON.stringify({
+            payload: response
+          }));
+        } catch (error) {
+          console.error("Error processing event:", error);
+        }
+      }
+    } catch (error) {
+      console.error("Fatal error in exchange engine:", error);
+      // Clean up resources
+      await this.prisma.$disconnect();
+      await this.redisClient.quit();
+      process.exit(1);
+    }
+  }
+
+  async processEvent(message, clientId) {
+    const { type, data } = message;
+    
+    let response;
+    switch (type) {
+      case "CREATE_ORDER":
+        response = await this.handleCreateOrder(data, clientId);
+        break;
+      case "CANCEL_ORDER":
+        response = await this.handleCancelOrder(data, clientId);
+        break;
+      case "GET_OPEN_ORDER":
+        response = await this.handleGetOpenOrder(data);
+        break;
+      case "ON_RAMP":
+        response = await this.handleOnRamp(data, clientId);
+        break;
+      default:
+        response = { type: "ERROR", data: { message: "Unknown event type" } };
+    }
+    
+    // Log the orderbook after processing the event
+    this.logOrderbook();
+    
+    return response;
+  }
+
+  // Get user balance information to include in responses
+  getUserBalanceInfo(userId) {
+    if (!this.balances[userId]) {
+      return null;
+    }
+    
+    return {
+      userId,
+      balances: { ...this.balances[userId] }
+    };
+  }
+
+  async handleCreateOrder(data, clientId) {
+    const { market, price, quantity, side, userId, shareType = "yes" } = data;
+    
+    // Validation for price and quantity
+    if (price <= 0 || quantity <= 0) {
+      return { 
+        type: "ERROR", 
+        data: { message: "Price and quantity must be positive" }
+      };
+    }
+    
+    console.log(`Processing ${side} order: ${quantity} @ $${price} in ${market} for user ${userId}`);
+    
+    // Parse the market to get the topic ID
+    // Assuming market format: topicId-yes/no-usd
+    const [topicId, shareTypeFromMarket] = market.split('-');
+    
+    // Use the provided shareType or extract from market
+    const finalShareType = shareTypeFromMarket || shareType;
+    
+    // Load user balance on demand
+    if (!this.balances[userId]) {
+      const userBalance = await this.loadUserBalance(userId);
+      if (!userBalance) {
+        return { type: "ERROR", data: { message: `User ${userId} not found` } };
+      }
+    }
+    
+    // Determine the asset and required balance
+    let asset;
+    if (side === "buy") {
+      asset = "USD";
+    } else {
+      // For sell orders, the asset is the specific share type
+      asset = `${topicId}-${finalShareType.toLowerCase()}-usd`;
+    }
+    
+    // Initialize the asset balance if it doesn't exist
+    if (this.balances[userId][asset] === undefined) {
+      this.balances[userId][asset] = 0;
+      console.log(`Initialized ${asset} balance for user ${userId} to 0`);
+    }
+    
+    // Calculate required balance for the order
+    const requiredBalance = side === "buy" ? price * quantity : quantity;
+    
+    // Check if user has sufficient balance
+    if (this.balances[userId][asset] < requiredBalance) {
+      return { 
+        type: "ERROR", 
+        data: { 
+          message: "Insufficient balance", 
+          userId,
+          asset,
+          required: requiredBalance,
+          available: this.balances[userId][asset]
+        } 
+      };
+    }
+    
+    // Lock the balance temporarily
+    const oldBalance = this.balances[userId][asset];
+    this.balances[userId][asset] -= requiredBalance;
+    
+    // Track the balance change
+    this.trackBalanceChange(userId, asset, oldBalance, this.balances[userId][asset], "ORDER_PLACED");
+    
+    // Get or create the orderbook for this market
+    const orderbook = this.getOrderbook(market);
+    
+    // Determine which side of the orderbook to match against
+    const matches = side === "buy" ? orderbook.asks : orderbook.bids;
+    const matchedOrders = [];
+    let remainingQuantity = quantity;
+    
+    // Track affected users to include their balance in the response
+    const affectedUsers = new Set([userId]);
+    
+    // Try to match the order with existing orders
+    for (let i = 0; i < matches.length && remainingQuantity > 0; i++) {
+      const match = matches[i];
+      
+      // Check if the price matches
+      if ((side === "buy" && price >= match.price) || (side === "sell" && price <= match.price)) {
+        const matchedQuantity = Math.min(remainingQuantity, match.quantity);
+        remainingQuantity -= matchedQuantity;
+        match.quantity -= matchedQuantity;
+        
+        // Add counterparty to affected users
+        affectedUsers.add(match.userId);
+        
+        // Update balances for the matched order
+        const counterpartyAsset = side === "buy" 
+          ? `${topicId}-${finalShareType.toLowerCase()}-usd` 
+          : "USD";
+        
+        // Update counterparty's balances
+        if (!this.balances[match.userId]) {
+          // Load the counterparty's balance if not already loaded
+          this.balances[match.userId] = await this.loadUserBalance(match.userId);
+        }
+        
+        if (this.balances[match.userId][counterpartyAsset] === undefined) {
+          this.balances[match.userId][counterpartyAsset] = 0;
+        }
+        
+        const matchPrice = side === "buy" ? match.price : price;
+        const oldCounterpartyBalance = this.balances[match.userId][counterpartyAsset];
+        
+        // Update counterparty's asset balance
+        if (side === "buy") {
+          // Seller receives USD
+          this.balances[match.userId][counterpartyAsset] += matchedQuantity * matchPrice;
+        } else {
+          // Buyer receives shares
+          this.balances[match.userId][counterpartyAsset] += matchedQuantity;
+        }
+        
+        // Track the counterparty balance change
+        this.trackBalanceChange(
+          match.userId, 
+          counterpartyAsset, 
+          oldCounterpartyBalance, 
+          this.balances[match.userId][counterpartyAsset], 
+          "ORDER_MATCHED_RECEIVED"
+        );
+        
+        // FIXED: For the order creator, handle balances correctly
+        if (side === "buy") {
+          // For buy orders:
+          // 1. We already deducted USD when the order was placed
+          // 2. If the match price is better than the limit price, refund the difference
+          // 3. Add the shares received
+          
+          // If buyer got a better price than their limit
+          if (matchPrice < price) {
+            // Refund the price difference
+            const refund = matchedQuantity * (price - matchPrice);
+            const oldUserUsdBalance = this.balances[userId]["USD"];
+            this.balances[userId]["USD"] += refund;
+            
+            // Track the refund
+            this.trackBalanceChange(
+              userId,
+              "USD",
+              oldUserUsdBalance,
+              this.balances[userId]["USD"],
+              "PRICE_IMPROVEMENT"
+            );
+            
+            console.log(`Buy order price improvement: Refunded ${refund} USD to ${userId}`);
+          }
+          
+          // Add the shares received
+          const userShareAsset = `${topicId}-${finalShareType.toLowerCase()}-usd`;
+          if (this.balances[userId][userShareAsset] === undefined) {
+            this.balances[userId][userShareAsset] = 0;
+          }
+          
+          const oldUserShareBalance = this.balances[userId][userShareAsset];
+          this.balances[userId][userShareAsset] += matchedQuantity;
+          
+          // Track the shares received
+          this.trackBalanceChange(
+            userId,
+            userShareAsset,
+            oldUserShareBalance,
+            this.balances[userId][userShareAsset],
+            "SHARES_RECEIVED"
+          );
+          
+          console.log(`User ${userId} received ${matchedQuantity} ${userShareAsset}`);
+        } else { // side === "sell"
+          // For sell orders:
+          // 1. We already deducted shares when the order was placed
+          // 2. Add USD received from the sale
+          
+          if (this.balances[userId]["USD"] === undefined) {
+            this.balances[userId]["USD"] = 0;
+          }
+          
+          const oldUserUsdBalance = this.balances[userId]["USD"];
+          this.balances[userId]["USD"] += matchedQuantity * matchPrice;
+          
+          // Track the USD received
+          this.trackBalanceChange(
+            userId,
+            "USD",
+            oldUserUsdBalance,
+            this.balances[userId]["USD"],
+            "USD_RECEIVED"
+          );
+          
+          console.log(`User ${userId} received ${matchedQuantity * matchPrice} USD from sale`);
+        }
+        
+        // Record the matched order
+        const tradeInfo = {
+          price: matchPrice,
+          quantity: matchedQuantity,
+          buyer: side === "buy" ? userId : match.userId,
+          seller: side === "buy" ? match.userId : userId,
+          topicId: parseInt(topicId),
+          shareType: finalShareType.toUpperCase()
+        };
+        
+        matchedOrders.push(tradeInfo);
+        
+        // Queue the trade for database persistence
+        this.queueDbOperation({
+          type: "CREATE_TRADE",
+          data: tradeInfo
+        });
+        
+        // Remove the order if fully matched
+        if (match.quantity === 0) {
+          matches.splice(i, 1);
+          i--;
+          
+          // Queue the order update (mark as filled)
+          this.queueDbOperation({
+            type: "UPDATE_ORDER",
+            data: {
+              orderId: match.orderId,
+              status: "FILLED",
+              remainingQuantity: 0
+            }
+          });
+        } else {
+          // Queue the order update (update remaining quantity)
+          this.queueDbOperation({
+            type: "UPDATE_ORDER",
+            data: {
+              orderId: match.orderId,
+              status: "PARTIALLY_FILLED",
+              remainingQuantity: match.quantity
+            }
+          });
+        }
+      }
+    }
+    
+    // Collect balance information for all affected users
+    const userBalances = {};
+    for (const affectedUserId of affectedUsers) {
+      userBalances[affectedUserId] = this.getUserBalanceInfo(affectedUserId);
+    }
+    
+    // Publish trade details for each matched order along with balance info
+    matchedOrders.forEach((trade) => {
+      this.publishTradeWithBalances(market, trade, {
+        [trade.buyer]: userBalances[trade.buyer],
+        [trade.seller]: userBalances[trade.seller]
+      });
+    });
+    
+    // Publish the updated orderbook
+    this.publishOrderbook(market);
+    
+    // If order is fully filled
+    if (remainingQuantity === 0) {
+      return {
+        type: "ORDER_EXECUTED",
+        data: {
+          market,
+          price,
+          quantity,
+          side,
+          status: "filled",
+          matchedOrders,
+          userBalance: userBalances[userId]
+        }
+      };
+    }
+    
+    // If order is partially filled or not filled at all
+    if (remainingQuantity > 0) {
+      const orderId = this.generateOrderId();
+      const newOrder = { 
+        price, 
+        quantity: remainingQuantity, 
+        userId, 
+        orderId, 
+        timestamp: Date.now(),
+        market // Add market to the order for easier reference
+      };
+      
+      // Add the new order to the orderbook
+      if (side === "buy") {
+        orderbook.bids.push(newOrder);
+        orderbook.bids.sort((a, b) => b.price - a.price || a.timestamp - b.timestamp);
+      } else {
+        orderbook.asks.push(newOrder);
+        orderbook.asks.sort((a, b) => a.price - b.price || a.timestamp - b.timestamp);
+      }
+      
+      // Queue the new order for database persistence
+      this.queueDbOperation({
+        type: "CREATE_ORDER",
+        data: {
+          orderId,
+          userId,
+          topicId: parseInt(topicId),
+          side: side.toUpperCase(),
+          shareType: finalShareType.toUpperCase(),
+          price,
+          quantity,
+          remainingQuantity,
+          status: matchedOrders.length > 0 ? "PARTIALLY_FILLED" : "OPEN"
+        }
+      });
+      
+      // Publish the updated orderbook
+      this.publishOrderbook(market);
+      
+      return {
+        type: "ORDER_PARTIALLY_FILLED",
+        data: {
+          market,
+          price,
+          quantity,
+          side,
+          status: matchedOrders.length > 0 ? "partially_filled" : "open",
+          remainingQuantity,
+          matchedOrders,
+          orderId,
+          userBalance: userBalances[userId]
+        }
+      };
+    }
+  }
+
+  async handleCancelOrder(data, clientId) {
+    const { orderId, userId } = data;
+    
+    console.log(`Attempting to cancel order ${orderId} for user ${userId}`);
+    
+    // Find the order in all orderbooks
+    let foundOrder = null;
+    let foundMarket = null;
+    let foundSide = null;
+    
+    for (const market in this.orderbook) {
+      // Check in bids
+      const bidIndex = this.orderbook[market].bids.findIndex(o => o.orderId === orderId && o.userId === userId);
+      if (bidIndex !== -1) {
+        foundOrder = this.orderbook[market].bids[bidIndex];
+        foundMarket = market;
+        foundSide = "bids";
+        break;
+      }
+      
+      // Check in asks
+      const askIndex = this.orderbook[market].asks.findIndex(o => o.orderId === orderId && o.userId === userId);
+      if (askIndex !== -1) {
+        foundOrder = this.orderbook[market].asks[askIndex];
+        foundMarket = market;
+        foundSide = "asks";
+        break;
+      }
+    }
+    
+    if (!foundOrder) {
+      console.log(`Order ${orderId} not found for user ${userId}`);
+      return { type: "ERROR", data: { message: "Order not found", orderId } };
+    }
+    
+    // Remove the order from the orderbook
+    const orderIndex = this.orderbook[foundMarket][foundSide].findIndex(o => o.orderId === orderId);
+    const [order] = this.orderbook[foundMarket][foundSide].splice(orderIndex, 1);
+    
+    console.log(`Cancelled order: ${JSON.stringify(order)}`);
+    
+    // Parse the market to get topic ID and share type
+    const [topicId, shareType] = foundMarket.split('-');
+    
+    // Return the locked balance to the user
+    const asset = foundSide === "bids" ? "USD" : `${topicId}-${shareType}-usd`;
+    
+    // Make sure user has a balance object
+    if (!this.balances[userId]) {
+      await this.loadUserBalance(userId);
+      if (!this.balances[userId]) {
+        console.error(`Failed to load balance for user ${userId}`);
+        this.balances[userId] = {};
+      }
+    }
+    
+    if (this.balances[userId][asset] === undefined) {
+      this.balances[userId][asset] = 0;
+    }
+    
+    const oldBalance = this.balances[userId][asset];
+    
+    // FIXED: Return the correct amount based on order side
+    let returnAmount;
+    if (foundSide === "bids") {
+      // For buy orders, return price * quantity (the USD locked)
+      returnAmount = order.quantity * order.price;
+    } else {
+      // For sell orders, return just the quantity (the shares locked)
+      returnAmount = order.quantity;
+    }
+    
+    this.balances[userId][asset] += returnAmount;
+    
+    console.log(`Order cancellation: Returning ${returnAmount} ${asset} to user ${userId}`);
+    console.log(`User balance ${userId}.${asset}: ${oldBalance} → ${this.balances[userId][asset]}`);
+    
+    // Track the balance change
+    this.trackBalanceChange(
+      userId,
+      asset,
+      oldBalance,
+      this.balances[userId][asset],
+      "ORDER_CANCELED"
+    );
+    
+    // Queue the order update
+    this.queueDbOperation({
+      type: "UPDATE_ORDER",
+      data: {
+        orderId,
+        status: "CANCELED",
+        remainingQuantity: 0
+      }
+    });
+    
+    // Publish the updated orderbook
+    this.publishOrderbook(foundMarket);
+    
+    return {
+      type: "ORDER_CANCELED",
+      data: { 
+        market: foundMarket, 
+        orderId, 
+        status: "canceled",
+        userBalance: this.getUserBalanceInfo(userId)
+      }
+    };
+  }
+
+  async handleGetOpenOrder(data) {
+    const { market, userId } = data;
+    
+    // If market is not specified, get all orders for the user
+    if (!market) {
+      const allOrders = [];
+      
+      for (const marketId in this.orderbook) {
+        const userBids = this.orderbook[marketId].bids.filter(o => o.userId === userId);
+        const userAsks = this.orderbook[marketId].asks.filter(o => o.userId === userId);
+        
+        allOrders.push(...userBids.map(o => ({ ...o, market: marketId, side: "buy" })));
+        allOrders.push(...userAsks.map(o => ({ ...o, market: marketId, side: "sell" })));
+      }
+      
+      return {
+        type: "OPEN_ORDERS",
+        data: { 
+          userId, 
+          orders: allOrders,
+          userBalance: this.getUserBalanceInfo(userId)
+        }
+      };
+    }
+    
+    // Get orders for a specific market
+    const orderbook = this.getOrderbook(market);
+    const userBids = orderbook.bids.filter(o => o.userId === userId).map(o => ({ ...o, side: "buy", market }));
+    const userAsks = orderbook.asks.filter(o => o.userId === userId).map(o => ({ ...o, side: "sell", market }));
+    
+    return {
+      type: "OPEN_ORDERS",
+      data: { 
+        market, 
+        userId, 
+        orders: [...userBids, ...userAsks],
+        userBalance: this.getUserBalanceInfo(userId)
+      }
+    };
+  }
+
+  async handleOnRamp(data, clientId) {
+    const { userId, asset, amount } = data;
+    
+    // Validate input
+    if (!userId || !asset || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      return {
+        type: "ERROR",
+        data: { message: "Invalid onramp parameters. Requires userId, asset, and positive amount" }
+      };
+    }
+    
+    console.log(`Processing onramp: ${amount} ${asset} for user ${userId}`);
+    
+    // Initialize user balance if not already loaded
+    if (!this.balances[userId]) {
+      const userBalance = await this.loadUserBalance(userId);
+      if (!userBalance) {
+        this.balances[userId] = {};
+      }
+    }
+    
+    // Initialize asset balance if not already set
+    if (this.balances[userId][asset] === undefined) {
+      this.balances[userId][asset] = 0;
+    }
+    
+    // Update the balance
+    const oldBalance = this.balances[userId][asset];
+    this.balances[userId][asset] += parseFloat(amount);
+    
+    // Track the balance change
+    this.trackBalanceChange(
+      userId,
+      asset,
+      oldBalance,
+      this.balances[userId][asset],
+      "ON_RAMP"
+    );
+    
+    return {
+      type: "ON_RAMP_SUCCESS",
+      data: { 
+        userId, 
+        asset, 
+        amount, 
+        userBalance: this.getUserBalanceInfo(userId)
+      }
+    };
+  }
+
+  getOrderbook(market) {
+    if (!this.orderbook[market]) {
+      this.orderbook[market] = { bids: [], asks: [] };
+    }
+    return this.orderbook[market];
+  }
+
+  generateOrderId() {
+    return `ord_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  }
+
+  publishOrderbook(market) {
+    const orderbook = this.getOrderbook(market);
+    
+    // Aggregate bids by price
+    const aggregatedBids = this.aggregateOrdersByPrice(orderbook.bids);
+    
+    // Aggregate asks by price
+    const aggregatedAsks = this.aggregateOrdersByPrice(orderbook.asks);
+    
+    // Format the orderbook
+    const formattedOrderbook = {
+      market,
+      bids: aggregatedBids,
+      asks: aggregatedAsks
+    };
+    
+    // Publish the orderbook to the market-specific channel
+    const channel = `orderbook_${market}`;
+    this.redisClient.publish(channel, JSON.stringify(formattedOrderbook));
+  }
+
+  // Helper method to aggregate orders by price
+  aggregateOrdersByPrice(orders) {
+    // Use a Map to group orders by price
+    const priceMap = new Map();
+    
+    // Sum quantities for each price level
+    orders.forEach(order => {
+      const price = order.price;
+      if (!priceMap.has(price)) {
+        priceMap.set(price, 0);
+      }
+      priceMap.set(price, priceMap.get(price) + order.quantity);
+    });
+    
+    // Convert Map to array of price/quantity objects
+    const aggregated = Array.from(priceMap.entries()).map(([price, quantity]) => ({
+      price,
+      quantity
+    }));
+    
+    // Sort by price (descending for bids, ascending for asks would be handled by the caller)
+    return aggregated;
+  }
+
+  // Updated to include balance information with trade details
+  publishTradeWithBalances(market, tradeDetails, userBalances) {
+    // Format the trade details
+    const formattedTrade = {
+      market,
+      price: tradeDetails.price,
+      quantity: tradeDetails.quantity,
+      buyer: tradeDetails.buyer,
+      seller: tradeDetails.seller,
+      timestamp: Date.now(),
+      userBalances  // Include balance information
+    };
+    
+    // Publish the trade to the market-specific channel
+    const channel = `trades_${market}`;
+    this.redisClient.publish(channel, JSON.stringify(formattedTrade));
+  }
+
+  logOrderbook() {
+    console.log("\n=== Current Orderbook ===");
+    for (const market in this.orderbook) {
+      console.log(`Market: ${market}`);
+      console.log("Bids:");
+      this.orderbook[market].bids.forEach((bid, index) => {
+        console.log(
+          `  ${index + 1}. Price: ${bid.price}, Quantity: ${bid.quantity}, User: ${bid.userId}, Order ID: ${bid.orderId}`
+        );
+      });
+      console.log("Asks:");
+      this.orderbook[market].asks.forEach((ask, index) => {
+        console.log(
+          `  ${index + 1}. Price: ${ask.price}, Quantity: ${ask.quantity}, User: ${ask.userId}, Order ID: ${ask.orderId}`
+        );
+      });
+    }
+    console.log("=========================\n");
+  }
+  
+  // New method to dump user balances for debugging
+  logUserBalances() {
+    console.log("\n=== Current User Balances ===");
+    for (const userId in this.balances) {
+      console.log(`User: ${userId}`);
+      for (const asset in this.balances[userId]) {
+        console.log(`  ${asset}: ${this.balances[userId][asset]}`);
+      }
+    }
+    console.log("============================\n");
+  }
+}
+
+// Initialize and start the engine
+const engine = new ExchangeEngine();
+engine.start().catch(error => {
+  console.error("Failed to start exchange engine:", error);
+  process.exit(1);
+});

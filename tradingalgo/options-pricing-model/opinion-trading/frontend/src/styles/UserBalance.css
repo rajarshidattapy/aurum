@@ -1,0 +1,66 @@
+/* src/styles/UserBalance.css */
+.user-balance {
+  background-color: #1f1f1f;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.user-balance h3 {
+  font-size: 16px;
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: #e0e0e0;
+}
+
+.balance-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.balance-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.balance-label {
+  color: #a0a0a0;
+}
+
+.balance-value {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.balance-value.pending {
+  color: #ffcc00;
+}
+
+.balance-value.yes {
+  color: #3a80ff;
+}
+
+.balance-value.no {
+  color: #ff4d6d;
+}
+
+.balance-divider {
+  height: 1px;
+  background-color: #333;
+  margin: 8px 0;
+}
+
+.balance-loading {
+  color: #888;
+  font-size: 14px;
+  padding: 10px 0;
+}
+
+.balance-error {
+  color: #ff4d6d;
+  font-size: 14px;
+  padding: 10px 0;
+}
