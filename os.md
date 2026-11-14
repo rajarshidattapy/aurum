@@ -28,3 +28,8 @@ https://www.instagram.com/p/DWOnSaMCBzJ/https://www.instagram.com/p/DUkgV7MDOUm/
 
 hkirat trading platform sys design: https://youtu.be/8DgZulk8NK4?si=ioY_0_bmrc6Jqjj8
 
+https://youtu.be/NYCUMKUBcXM?si=Y4odkXszgtKp45KU
+
+https://youtu.be/aEMBp9Bqfwc?si=qHfVqWvfhdbsigmd
+
+https://youtu.be/857ejsBc3IA?si=asYY4Q9Kd7Vjgiih
