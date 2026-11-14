@@ -25,3 +25,6 @@ https://www.instagram.com/reels/DVmXfm2gWwJ/
 https://github.com/microsoft/qlib
 
 https://www.instagram.com/p/DWOnSaMCBzJ/https://www.instagram.com/p/DUkgV7MDOUm/https://www.instagram.com/p/DUkApI0jBM6/https://www.instagram.com/p/DTAewIvjIgr/?img_index=1https://www.instagram.com/p/DRsaq9iDbqs/https://www.instagram.com/p/DRaJhdHCHsp/?img_index=1https://www.instagram.com/p/DRg-sKuiAB2/?img_index=1https://www.instagram.com/p/DRaJuOSiKUP/?img_index=1https://www.instagram.com/p/DRRTb2aiE4M/?img_index=1https://www.instagram.com/p/DL3gEkIS_9D/https://www.instagram.com/p/DLOHuJKyPbn/https://www.instagram.com/p/DLRpOCMp_14/https://www.instagram.com/p/DMKkvx_MZek/
+
+hkirat trading platform sys design: https://youtu.be/8DgZulk8NK4?si=ioY_0_bmrc6Jqjj8
+
