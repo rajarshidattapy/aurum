@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional
+from ..utils.exceptions import ProcessingError
 import logging
 from dataclasses import dataclass
 
@@ -96,8 +97,13 @@ class DataProcessor:
     def _validate_data(self, df: pd.DataFrame) -> None:
         """验证数据完整性"""
         if df.empty:
-            raise ValueError("Empty dataframe provided")
+            raise ProcessingError("Empty dataframe provided")
         
         missing_columns = [col for col in self.required_columns if col not in df.columns]
         if missing_columns:
-            raise ValueError(f"Missing required columns: {missing_columns}") 
+            raise ProcessingError(f"Missing required columns: {missing_columns}")
+
+
+# Backwards-compatible alias: older callers (and processors/__init__.py)
+# import this dataclass as ProcessedData.
+ProcessedData = MarketAnalysis

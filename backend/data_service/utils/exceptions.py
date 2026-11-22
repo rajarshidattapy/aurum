@@ -2,7 +2,7 @@ class DataFetchError(Exception):
     """Raised when there's an error fetching data from APIs"""
     pass
 
-class ProcessingError(Exception):
+class ProcessingError(ValueError):
     """Raised when there's an error processing market data"""
     pass
 

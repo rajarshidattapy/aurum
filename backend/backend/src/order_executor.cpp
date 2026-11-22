@@ -1,69 +1,46 @@
 #include "order_executor.hpp"
-#include <spdlog/spdlog.h>
-
+#include <stdexcept>
+#include <cmath>
 namespace trading {
-
-OrderExecutor::OrderExecutor() : running_(false) {
+// In-memory paper fills only. This class contains no broker adapter.
+OrderExecutor::OrderExecutor():running_(false) {}
+OrderExecutor::~OrderExecutor(){stop();}
+void OrderExecutor::start(){
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(running_) return;
+    running_=true; execution_thread_=std::thread(&OrderExecutor::executionLoop,this);
 }
-
-OrderExecutor::~OrderExecutor() {
-    stop();
+void OrderExecutor::stop(){
+    { std::lock_guard<std::mutex> lock(mutex_); running_=false;
+      while(!order_queue_.empty()) {order_queue_.front()->setStatus(OrderStatus::CANCELLED);order_queue_.pop();} }
+    cv_.notify_all(); if(execution_thread_.joinable()) execution_thread_.join();
 }
-
-void OrderExecutor::start() {
-    running_ = true;
-    execution_thread_ = std::thread(&OrderExecutor::executionLoop, this);
-    spdlog::info("Order executor started");
+void OrderExecutor::submitOrder(std::shared_ptr<Order> order){
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(!running_) throw std::logic_error("Paper executor is not started");
+    if(!order || !std::isfinite(order->getQuantity()) || order->getQuantity()<=0 ||
+       !std::isfinite(order->getPrice()) || order->getPrice()<=0 || order->getType()!=OrderType::MARKET)
+        throw std::invalid_argument("Paper fills require a positive quantity and mark price; market orders only");
+    if(orders_.count(order->getOrderId())) throw std::invalid_argument("Duplicate order");
+    orders_[order->getOrderId()]=order;order_queue_.push(order);cv_.notify_one();
 }
-
-void OrderExecutor::stop() {
-    running_ = false;
-    cv_.notify_one();
-    
-    if (execution_thread_.joinable()) {
-        execution_thread_.join();
-    }
-    spdlog::info("Order executor stopped");
+void OrderExecutor::cancelOrder(const std::string& id){
+    std::lock_guard<std::mutex> lock(mutex_);auto it=orders_.find(id);
+    if(it==orders_.end()) throw std::out_of_range("Unknown order");
+    if(it->second->getStatus()==OrderStatus::PENDING) it->second->setStatus(OrderStatus::CANCELLED);
 }
-
-void OrderExecutor::submitOrder(std::shared_ptr<Order> order) {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        order_queue_.push(order);
-    }
-    cv_.notify_one();
-    spdlog::info("Order submitted: {}", order->getOrderId());
+OrderStatus OrderExecutor::getOrderStatus(const std::string& id){
+    std::lock_guard<std::mutex> lock(mutex_);return orders_.at(id)->getStatus();
 }
-
-void OrderExecutor::executionLoop() {
-    while (running_) {
-        std::shared_ptr<Order> order;
-        {
-            std::unique_lock<std::mutex> lock(mutex_);
-            cv_.wait(lock, [this] { 
-                return !order_queue_.empty() || !running_; 
-            });
-            
-            if (!running_) break;
-            
-            order = order_queue_.front();
-            order_queue_.pop();
-        }
-        
-        executeOrder(order);
+void OrderExecutor::executionLoop(){
+    for(;;){ std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock,[this]{return !running_ || !order_queue_.empty();});
+        if(!running_) return;
+        auto order=order_queue_.front();order_queue_.pop();
+        if(order->getStatus()==OrderStatus::PENDING) executeOrder(order);
     }
 }
-
-void OrderExecutor::executeOrder(std::shared_ptr<Order> order) {
-    try {
-        // 实现实际的订单执行逻辑
-        order->setStatus(OrderStatus::FILLED);
-        spdlog::info("Order executed: {}", order->getOrderId());
-        
-    } catch (const std::exception& e) {
-        order->setStatus(OrderStatus::REJECTED);
-        spdlog::error("Order execution failed: {}", e.what());
-    }
+void OrderExecutor::executeOrder(std::shared_ptr<Order> order){
+    order->setFilledQuantity(order->getQuantity());order->setStatus(OrderStatus::FILLED);
 }
-
-} // namespace trading 
+}

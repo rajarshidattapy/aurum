@@ -4,15 +4,18 @@ setup(
     name="data_service",
     version="0.1",
     packages=find_packages(),
+    package_data={"data_service.web": ["terminal_snapshot.json"]},
     install_requires=[
         'pandas',
+        'yfinance>=0.2.50',
+        'pybind11>=2.13',
         'numpy',
         'python-binance>=1.0.0',
         'websocket-client>=1.0.0',
         'websockets>=10.0',
         'aiohttp>=3.8.0',
         'alpha_vantage',
-        'fastapi',
+        'fastapi>=0.115',
         'uvicorn',
         'redis',
         'requests',
@@ -23,7 +26,10 @@ setup(
         'test': [
             'pytest',
             'pytest-cov',
-            'pytest-asyncio'
+            'pytest-asyncio',
+            'httpx',
+            'openai',
+            'scikit-learn'
         ],
         'ai': [
             'openai',
@@ -54,7 +60,7 @@ setup(
             'redis>=4.0.0'
         ],
         'web': [
-            'fastapi',
+            'fastapi>=0.115',
             'uvicorn[standard]',
             'jinja2',
             'aiofiles'

@@ -1,5 +1,5 @@
-from binance.client import Client
-from binance.websockets import BinanceSocketManager
+from binance import client as binance_client
+from binance import ThreadedWebsocketManager
 from datetime import datetime
 import pandas as pd
 import logging
@@ -9,7 +9,7 @@ from ..utils.exceptions import DataFetchError
 
 class BinanceFetcher:
     """Binance数据获取器"""
-    
+
     def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None):
         """
         初始化Binance客户端
@@ -18,7 +18,8 @@ class BinanceFetcher:
         """
         self.logger = logging.getLogger(__name__)
         try:
-            self.client = Client(api_key, api_secret, tld='us')
+            self.client = binance_client.Client(api_key, api_secret, tld='us', ping=False)
+            self.api_key, self.api_secret = api_key, api_secret
             self.bm = None  # WebSocket管理器
             self.ws_connections = {}  # 存储WebSocket连接
             self.logger.info("Binance fetcher initialized successfully")
@@ -47,7 +48,7 @@ class BinanceFetcher:
             # 转换时间格式
             start_str = int(start_time.timestamp() * 1000) if start_time else None
             end_str = int(end_time.timestamp() * 1000) if end_time else None
-            
+
             # 获取K线数据
             klines = self.client.get_klines(
                 symbol=symbol,
@@ -56,23 +57,23 @@ class BinanceFetcher:
                 endTime=end_str,
                 limit=limit
             )
-            
+
             # 转换为DataFrame
             df = pd.DataFrame(klines, columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 'volume',
                 'close_time', 'quote_volume', 'trades', 'taker_buy_base',
                 'taker_buy_quote', 'ignore'
             ])
-            
+
             # 处理数据类型
             numeric_columns = ['open', 'high', 'low', 'close', 'volume']
             df[numeric_columns] = df[numeric_columns].astype(float)
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
-            
+
             self.logger.info(f"Successfully fetched {len(df)} records for {symbol}")
             return df
-            
+
         except Exception as e:
             self.logger.error(f"Error fetching historical data: {str(e)}")
             raise DataFetchError(f"Failed to fetch historical data: {str(e)}")
@@ -85,11 +86,12 @@ class BinanceFetcher:
         """
         try:
             if not self.bm:
-                self.bm = BinanceSocketManager(self.client)
-            
+                self.bm = ThreadedWebsocketManager(api_key=self.api_key, api_secret=self.api_secret, tld="us")
+                self.bm.start()
+
             # 创建K线数据连接
             conn_key = f"{symbol.lower()}@kline_1m"
-            
+
             def handle_socket_message(msg):
                 try:
                     if msg['e'] == 'kline':
@@ -105,17 +107,16 @@ class BinanceFetcher:
                         callback(data)
                 except Exception as e:
                     self.logger.error(f"Error processing websocket message: {str(e)}")
-            
+
             self.ws_connections[conn_key] = self.bm.start_kline_socket(
                 symbol=symbol,
                 callback=handle_socket_message,
                 interval='1m'
             )
-            
+
             # 启动WebSocket
-            self.bm.start()
             self.logger.info(f"WebSocket started for {symbol}")
-            
+
         except Exception as e:
             self.logger.error(f"Error starting websocket: {str(e)}")
             raise
@@ -149,6 +150,15 @@ class BinanceFetcher:
             self.logger.error(f"Error fetching order book: {str(e)}")
             raise DataFetchError(f"Failed to fetch order book: {str(e)}")
 
+    def get_market_depth(self, symbol: str = "BTCUSD", limit: int = 5) -> Dict:
+        """
+        获取市场深度(get_order_book 的别名,供 main.py 等调用方使用)
+        :param symbol: 交易对
+        :param limit: 深度档数
+        :return: {'bids': [[price, qty], ...], 'asks': [[price, qty], ...]}
+        """
+        return self.get_order_book(symbol=symbol, limit=limit)
+
     def get_recent_trades(self, symbol: str = "BTCUSD", limit: int = 100) -> pd.DataFrame:
         """
         获取最近成交
@@ -165,4 +175,10 @@ class BinanceFetcher:
             return df
         except Exception as e:
             self.logger.error(f"Error fetching recent trades: {str(e)}")
-            raise DataFetchError(f"Failed to fetch recent trades: {str(e)}") 
+            raise DataFetchError(f"Failed to fetch recent trades: {str(e)}")
+
+    def get_current_price(self, symbol: str = "BTCUSD") -> float:
+        try:
+            return float(self.client.get_symbol_ticker(symbol=symbol)['price'])
+        except Exception as exc:
+            raise DataFetchError("Failed to fetch current price") from exc

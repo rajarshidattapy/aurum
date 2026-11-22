@@ -2,36 +2,36 @@
 #include <string>
 #include <memory>
 #include <vector>
-#include <pybind11/pybind11.h>
-#include <pybind11/numpy.h>
+#include <functional>
 #include "common/types.hpp"
 
 namespace trading {
 
+// Loads market data from the Python data_service layer (embedded interpreter).
 class DataLoader {
 public:
     DataLoader();
     ~DataLoader();
 
-    // 从Python数据服务获取数据
+    // Latest market data snapshot for a symbol (60s cache).
     MarketData loadMarketData(const std::string& symbol);
-    
-    // 获取历史数据
+
+    // Historical OHLCV bars between start and end.
     std::vector<MarketData> loadHistoricalData(
         const std::string& symbol,
         const Timestamp& start,
         const Timestamp& end
     );
-    
-    // 订阅实时数据
+
+    // Subscribe to a real-time stream (delegates to the Python fetcher).
     void subscribeToRealTimeData(
         const std::string& symbol,
         std::function<void(const MarketData&)> callback
     );
 
 private:
-    py::module data_service_;  // Python模块
-    py::object fetcher_;       // Python数据获取器实例
+    class Impl;
+    std::unique_ptr<Impl> pimpl_;
 };
 
-} // namespace trading 
+} // namespace trading

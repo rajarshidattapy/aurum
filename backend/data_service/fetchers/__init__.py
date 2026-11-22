@@ -9,4 +9,6 @@ try:
 except ImportError:
     AlphaVantageFetcher = None
 
-__all__ = ['BinanceFetcher', 'AlphaVantageFetcher'] 
+__all__ = ['BinanceFetcher', 'AlphaVantageFetcher']
+from .yahoo_fetcher import YahooFetcher
+__all__.append("YahooFetcher")

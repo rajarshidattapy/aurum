@@ -21,10 +21,16 @@ public:
     void updateRiskMetrics(const Portfolio& portfolio);
     std::map<std::string, double> getRiskMetrics() const;
 
+    // Feed latest prices so market orders (price = 0) can be risk-checked.
+    void updateCurrentPrices(const std::map<std::string, double>& prices);
+
 private:
+    void updateRiskMetricsLocked(const Portfolio& portfolio);
+
     RiskLimits limits_;
     std::map<std::string, double> current_metrics_;
-    std::mutex mutex_;
+    std::map<std::string, double> current_prices_;
+    mutable std::mutex mutex_;
 };
 
-} // namespace trading 
+} // namespace trading

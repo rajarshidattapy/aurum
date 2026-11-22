@@ -4,6 +4,7 @@
 #include <thread>
 #include <atomic>
 #include <condition_variable>
+#include <map>
 
 namespace trading {
 
@@ -23,6 +24,7 @@ private:
     void executeOrder(std::shared_ptr<Order> order);
 
     std::queue<std::shared_ptr<Order>> order_queue_;
+    std::map<std::string,std::shared_ptr<Order>> orders_;
     std::atomic<bool> running_;
     std::thread execution_thread_;
     std::mutex mutex_;

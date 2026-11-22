@@ -1,61 +1,29 @@
 #include "strategy.hpp"
 #include <numeric>
-#include <spdlog/spdlog.h>
-
+#include <stdexcept>
+#include <cmath>
 namespace trading {
-
 MovingAverageStrategy::MovingAverageStrategy(int short_period, int long_period)
-    : short_period_(short_period)
-    , long_period_(long_period) {
+    : short_period_(short_period), long_period_(long_period) {
+    if (short_period <= 0 || long_period <= short_period) throw std::invalid_argument("Require 0 < short < long");
 }
-
-void MovingAverageStrategy::initialize() {
-    prices_.clear();
+void MovingAverageStrategy::initialize() { prices_.clear(); last_seen_.clear(); previous_regime_.clear(); }
+std::vector<Strategy::Signal> MovingAverageStrategy::onMarketData(const MarketData& data) {
+    if (!std::isfinite(data.last_price) || data.last_price <= 0) return {};
+    if (last_seen_.count(data.symbol) && data.timestamp <= last_seen_[data.symbol]) return {};
+    last_seen_[data.symbol] = data.timestamp;
+    auto& prices = prices_[data.symbol];
+    prices.push_back(data.last_price);
+    if (prices.size() > static_cast<size_t>(long_period_)) prices.pop_front();
+    if (prices.size() < static_cast<size_t>(long_period_)) return {};
+    double short_ma = std::accumulate(prices.end()-short_period_, prices.end(), 0.0)/short_period_;
+    double long_ma = std::accumulate(prices.begin(), prices.end(), 0.0)/long_period_;
+    int regime = short_ma > long_ma ? 1 : short_ma < long_ma ? -1 : 0;
+    int previous = previous_regime_[data.symbol];
+    if (regime != 0) previous_regime_[data.symbol] = regime;
+    if (regime == 0 || previous == 0 || regime == previous) return {};
+    return {{data.symbol, regime > 0 ? OrderSide::BUY : OrderSide::SELL,
+             std::min(1.0, std::abs(short_ma-long_ma)/long_ma), data.timestamp}};
 }
-
-std::vector<Strategy::Signal> MovingAverageStrategy::onMarketData(
-    const MarketData& data) {
-    
-    std::vector<Signal> signals;
-    prices_.push_back(data.last_price);
-    
-    if (prices_.size() < static_cast<size_t>(long_period_)) {
-        return signals;
-    }
-    
-    // 计算移动平均
-    double short_ma = std::accumulate(
-        prices_.end() - short_period_, 
-        prices_.end(), 
-        0.0
-    ) / short_period_;
-    
-    double long_ma = std::accumulate(
-        prices_.end() - long_period_, 
-        prices_.end(), 
-        0.0
-    ) / long_period_;
-    
-    Signal signal;
-    signal.symbol = data.symbol;
-    signal.timestamp = data.timestamp;
-    
-    if (short_ma > long_ma) {
-        signal.side = OrderSide::BUY;
-        signal.strength = (short_ma - long_ma) / long_ma;
-    } else {
-        signal.side = OrderSide::SELL;
-        signal.strength = (long_ma - short_ma) / long_ma;
-    }
-    
-    signals.push_back(signal);
-    return signals;
+void MovingAverageStrategy::onOrderUpdate(const Order&) {}
 }
-
-void MovingAverageStrategy::onOrderUpdate(const Order& order) {
-    spdlog::info("Order {} updated: status = {}", 
-                 order.getOrderId(), 
-                 static_cast<int>(order.getStatus()));
-}
-
-} // namespace trading 

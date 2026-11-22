@@ -2,6 +2,8 @@
 #include "common/types.hpp"
 #include <vector>
 #include <memory>
+#include <deque>
+#include <map>
 
 namespace trading {
 
@@ -31,7 +33,9 @@ public:
 private:
     int short_period_;
     int long_period_;
-    std::vector<double> prices_;
+    std::map<std::string, std::deque<double>> prices_;
+    std::map<std::string, Timestamp> last_seen_;
+    std::map<std::string, int> previous_regime_;
 };
 
 } // namespace trading 

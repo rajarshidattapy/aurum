@@ -4,6 +4,10 @@
 #include <chrono>
 #include <memory>
 #include <map>
+#include <atomic>
+#include <cmath>
+#include <stdexcept>
+#include <algorithm>
 
 namespace trading {
 
@@ -71,7 +75,7 @@ public:
 
 private:
     static std::string generateOrderId() {
-        static int counter = 0;
+        static std::atomic<unsigned long> counter{0};
         return "ORD" + std::to_string(++counter);
     }
 
@@ -82,7 +86,7 @@ private:
     double quantity_;
     double price_ = 0.0;
     double filled_quantity_ = 0.0;
-    OrderStatus status_ = OrderStatus::PENDING;
+    std::atomic<OrderStatus> status_{OrderStatus::PENDING};
     Timestamp create_time_ = std::chrono::system_clock::now();
     Timestamp update_time_ = create_time_;
 };
@@ -93,10 +97,13 @@ public:
     Position(const std::string& symbol) : symbol_(symbol) {}
 
     void updatePosition(double quantity, double price) {
-        quantity_ += quantity;
-        if (quantity_ != 0) {
-            average_price_ = (average_price_ * (quantity_ - quantity) + price * quantity) / quantity_;
-        }
+        double next = quantity_ + quantity;
+        if (!std::isfinite(quantity) || !std::isfinite(price) || price<=0 || next < -1e-9)
+            throw std::invalid_argument("Invalid long-only fill");
+        if (quantity > 0) average_price_ = (average_price_*quantity_+price*quantity)/next;
+        quantity_ = std::max(0.0,next);
+        if (quantity_ == 0) average_price_ = 0;
+
     }
 
     double getQuantity() const { return quantity_; }
@@ -127,11 +134,28 @@ public:
         for (const auto& [symbol, position] : positions_) {
             if (current_prices.find(symbol) != current_prices.end()) {
                 total += position->getMarketValue(current_prices.at(symbol));
+            } else if (position->getQuantity() != 0) {
+                throw std::invalid_argument("Missing portfolio mark price for " + symbol);
             }
         }
         return total;
     }
 
+    void markToMarket(const std::map<std::string,double>& prices) {
+        total_exposure_ = 0; double largest = 0;
+        for (const auto& [symbol,position] : positions_) {
+            auto it=prices.find(symbol);
+            if(it==prices.end()) throw std::invalid_argument("Missing mark price");
+            double value=position->getMarketValue(it->second);
+            total_exposure_ += std::abs(value); largest=std::max(largest,std::abs(value));
+        }
+        double equity = getTotalValue(prices);
+        peak_ = std::max(peak_,equity);
+        drawdown_ = peak_>0 ? (peak_-equity)/peak_ : 1;
+        leverage_ = equity>0 ? total_exposure_/equity : 0;
+        concentration_ = equity>0 ? largest/equity : 0;
+        daily_pnl_ = equity-1000000.; // Session P&L, reset by a new Portfolio.
+    }
     double getCash() const { return cash_; }
     void updateCash(double amount) { cash_ += amount; }
     
@@ -147,6 +171,7 @@ public:
     double getConcentration() const { return concentration_; }
 
 private:
+    double peak_ = 1000000.0;
     double cash_ = 1000000.0;  // 初始资金100万
     std::map<std::string, std::shared_ptr<Position>> positions_;
     double total_exposure_ = 0.0;
